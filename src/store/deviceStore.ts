@@ -1,11 +1,12 @@
 import { create } from 'zustand'
-import type { DeviceStates, ChatMessage, NLUResult } from '../types'
+import type { DeviceStates, ChatMessage } from '../types'
 
 interface DeviceStore {
   devices: DeviceStates
   messages: ChatMessage[]
   sessionId: string | null
   pendingContextTrigger: string | null
+  clarificationTurn: number
   isLoading: boolean
   wsConnected: boolean
 
@@ -13,6 +14,7 @@ interface DeviceStore {
   addMessage: (msg: Omit<ChatMessage, 'id' | 'timestamp'>) => void
   setSessionId: (id: string) => void
   setPendingContextTrigger: (trigger: string | null) => void
+  setClarificationTurn: (turn: number) => void
   setLoading: (loading: boolean) => void
   setWsConnected: (connected: boolean) => void
   sendCommand: (text: string) => Promise<void>
@@ -34,6 +36,7 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   messages: [],
   sessionId: null,
   pendingContextTrigger: null,
+  clarificationTurn: 0,
   isLoading: false,
   wsConnected: false,
 
@@ -48,38 +51,38 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
 
   setSessionId: (id) => set({ sessionId: id }),
   setPendingContextTrigger: (trigger) => set({ pendingContextTrigger: trigger }),
+  setClarificationTurn: (turn) => set({ clarificationTurn: turn }),
   setLoading: (loading) => set({ isLoading: loading }),
   setWsConnected: (connected) => set({ wsConnected: connected }),
 
   sendCommand: async (text: string) => {
-    const { sessionId, addMessage, setLoading, setSessionId, setPendingContextTrigger } = get()
+    const { addMessage, setLoading, setSessionId, setPendingContextTrigger, setClarificationTurn } = get()
     addMessage({ role: 'user', text })
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/command/parse', {
+      const res = await fetch('/api/v1/commands/parse', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, session_id: sessionId }),
+        body: JSON.stringify({ device_id: 'edge-pi-01', stt_text: text }),
       })
       if (!res.ok) throw new Error(`서버 오류 (${res.status})`)
       const data = await res.json()
-      if (!data.nlu) throw new Error('응답 형식 오류')
-      const nlu: NLUResult = data.nlu
       setSessionId(data.session_id)
 
-      if (nlu.clarification_needed && nlu.clarification_question) {
-        setPendingContextTrigger(nlu.context_trigger)
+      if (data.clarification_needed) {
+        setPendingContextTrigger('pending')
+        setClarificationTurn(data.clarification_turn ?? 1)
         addMessage({
           role: 'assistant',
-          text: nlu.clarification_question,
+          text: data.response_text,
           isClarification: true,
-          contextTrigger: nlu.context_trigger ?? undefined,
           sessionId: data.session_id,
         })
       } else {
         setPendingContextTrigger(null)
-        addMessage({ role: 'assistant', text: nlu.response_text })
+        setClarificationTurn(0)
+        addMessage({ role: 'assistant', text: data.response_text })
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류'
@@ -90,38 +93,38 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   },
 
   sendClarification: async (text: string) => {
-    const { sessionId, pendingContextTrigger, addMessage, setLoading, setPendingContextTrigger } = get()
+    const { sessionId, pendingContextTrigger, clarificationTurn, addMessage, setLoading, setPendingContextTrigger, setClarificationTurn } = get()
     if (!sessionId || !pendingContextTrigger) return
 
     addMessage({ role: 'user', text })
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/dialogue/clarify', {
+      const res = await fetch('/api/v1/dialogues/clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          text,
+          device_id: 'edge-pi-01',
           session_id: sessionId,
-          context_trigger: pendingContextTrigger,
+          user_answer: text,
+          clarification_turn: clarificationTurn,
         }),
       })
       if (!res.ok) throw new Error(`서버 오류 (${res.status})`)
       const data = await res.json()
-      if (!data.nlu) throw new Error('응답 형식 오류')
-      const nlu: NLUResult = data.nlu
 
-      if (nlu.clarification_needed && nlu.clarification_question) {
-        setPendingContextTrigger(nlu.context_trigger)
+      if (data.clarification_needed) {
+        setPendingContextTrigger('pending')
+        setClarificationTurn(data.clarification_turn ?? clarificationTurn + 1)
         addMessage({
           role: 'assistant',
-          text: nlu.clarification_question,
+          text: data.response_text,
           isClarification: true,
-          contextTrigger: nlu.context_trigger ?? undefined,
         })
       } else {
         setPendingContextTrigger(null)
-        addMessage({ role: 'assistant', text: nlu.response_text })
+        setClarificationTurn(0)
+        addMessage({ role: 'assistant', text: data.response_text })
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류'
