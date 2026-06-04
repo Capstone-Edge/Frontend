@@ -7,123 +7,274 @@ import type { RobotVacuumState, TVState } from '../types'
 
 /* ─── 타입 ────────────────────────────────────────────── */
 
-type RoomId =
-  | 'living_room' | 'hallway' | 'family_room'
-  | 'bedroom1' | 'bedroom3' | 'bedroom4'
-  | 'bathroom' | 'bathroom2' | 'dressing_room'
-
+// Pt: {x, y} — x = world X, y = world Z (3D 세계 좌표 직접 사용)
 interface Pt { x: number; y: number }
-interface RoomDef { doors: Partial<Record<RoomId, Pt>> }
 
-/* ─── 방 정의 ─────────────────────────────────────────── */
-
-const ROOMS: Record<RoomId, RoomDef> = {
-  living_room: {
-    doors: {
-      hallway:     { x: 560, y: 130 },
-      family_room: { x: 560, y: 270 },
-    },
-  },
-  hallway: {
-    doors: {
-      bedroom1:    { x: 185, y: 160 },
-      bedroom3:    { x: 212, y: 185 },
-      bedroom4:    { x: 328, y: 185 },
-      bathroom2:   { x: 444, y: 185 },
-      family_room: { x: 510, y: 185 },
-      living_room: { x: 538, y: 130 },
-    },
-  },
-  bedroom1: {
-    doors: {
-      bathroom:      { x: 64,  y: 97  },
-      dressing_room: { x: 158, y: 97  },
-      hallway:       { x: 163, y: 160 },
-    },
-  },
-  bathroom:      { doors: { bedroom1:    { x: 64,  y: 75  } } },
-  dressing_room: { doors: { bedroom1:    { x: 158, y: 75  } } },
-  bedroom3:      { doors: { hallway:     { x: 212, y: 207 } } },
-  bedroom4:      { doors: { hallway:     { x: 328, y: 207 } } },
-  bathroom2:     { doors: { hallway:     { x: 444, y: 185 } } },
-  family_room: {
-    doors: {
-      hallway:     { x: 510, y: 207 },
-      living_room: { x: 538, y: 270 },
-    },
-  },
+interface HoveredInfo {
+  name: string
+  parentName: string
+  position: THREE.Vector3
+  size: THREE.Vector3
 }
 
-const SPIRAL_BOUNDS: Partial<Record<RoomId, { x: number; y: number; w: number; h: number }>> = {
-  living_room:   { x: 564, y:  45, w: 312, h: 319 },
-  hallway:       { x: 189, y: 101, w: 345, h:  80 },
-  bedroom1:      { x:  45, y: 101, w: 114, h: 224 },
-  bedroom3:      { x: 189, y: 211, w:  90, h: 114 },
-  bedroom4:      { x: 309, y: 211, w:  98, h: 114 },
-  bathroom:      { x:  45, y:  45, w:  78, h:  26 },
-  dressing_room: { x: 153, y:  45, w:  45, h:  26 },
-  family_room:   { x: 484, y: 211, w:  50, h: 114 },
-  bathroom2:     { x: 437, y: 211, w:  17, h:  32 },
+/* ─── 구역 기반 경로 계획 (3D 세계 좌표) ──────────────────── */
+
+// 도킹 스테이션 3D 위치 (GLB 실측)
+const DOCK: Pt = { x: 459.92, y: -14.81 }
+
+// 구역 폴리곤: [worldX, worldZ][] — 확정 좌표 그대로 사용
+const SECTOR_POLYS: Record<string, [number, number][]> = {
+  주방:  [[456.3,-16.5],[459.6,-16.5],[459.6,-14.80],[458.45,-14.80],[458.45,-15.5],[456.3,-15.5]],
+  세탁실: [[459.75,-17.2],[460.9,-17.2],[460.9,-15.3],[459.75,-15.3]],
+  침실3: [[462.8,-17],[465.4,-17],[465.4,-16.4],[464,-16.4],[464,-15],[465.4,-15],[465.4,-14.1],[463.5,-14.1],[463.5,-13.5],[462.8,-13.5]],
+  거실:  [[456.3,-14.7],[462.5,-14.7],[462.5,-13.5],[466,-13.5],[466,-11.4],[462.6,-11.4],[462.6,-10.2],[459.4,-10.2],[459.4,-11.4],[456.3,-11.4]],
+  침실1: [[462.8,-11.1],[466,-11.1],[466,-10],[465.3,-10],[465.3,-8.1],[462.8,-8.1]],
+  침실2: [[456.3,-11.1],[459.3,-11.1],[459.3,-8.1],[458.7,-8.1],[458.7,-9.8],[457.2,-9.8],[457.2,-8.1],[456.3,-8.1]],
 }
 
-const ZONE_ROOMS: Record<string, RoomId[]> = {
-  living_room:   ['living_room'],
-  kitchen:       ['living_room'],
-  bedroom:       ['bedroom1', 'bedroom3', 'bedroom4'],
-  bathroom:      ['bathroom', 'bathroom2'],
-  dressing_room: ['dressing_room'],
-  hallway:       ['hallway'],
-  family_room:   ['family_room'],
-  all: [
-    'living_room', 'hallway', 'family_room',
-    'bedroom1', 'bedroom3', 'bedroom4',
-    'bathroom', 'bathroom2', 'dressing_room',
-  ],
+// 문 중심점 (구역 간 이동 경유)
+const DOORS: Record<string, Pt> = {
+  '주방-거실':   { x: 459.1,   y: -14.80 },
+  '주방-세탁실': { x: 459.675, y: -16.2  },
+  '침실2-거실':  { x: 459.35,  y: -10.75 },
+  '침실1-거실':  { x: 462.65,  y: -10.75 },
+  '침실3-거실':  { x: 463.15,  y: -13.5  },
 }
 
-const CLEAN_ORDER: RoomId[] = [
-  'living_room', 'hallway',
-  'bedroom1', 'bedroom3', 'bedroom4',
-  'bathroom', 'dressing_room', 'family_room', 'bathroom2',
+// 구역 인접 그래프
+const SECTOR_GRAPH: Record<string, string[]> = {
+  주방:  ['거실', '세탁실'],
+  거실:  ['주방', '침실1', '침실2', '침실3'],
+  세탁실: ['주방'],
+  침실1: ['거실'],
+  침실2: ['거실'],
+  침실3: ['거실'],
+}
+
+// NLU zone 문자열 → 실제 구역명
+const ZONE_SECTORS: Record<string, string[]> = {
+  living_room: ['거실'],
+  kitchen:     ['주방'],
+  laundry:     ['세탁실'],
+  bedroom:     ['침실1', '침실2', '침실3'],
+  bedroom1:    ['침실1'],
+  bedroom2:    ['침실2'],
+  bedroom3:    ['침실3'],
+  all:         ['거실', '침실1', '침실2', '침실3', '주방', '세탁실'],
+}
+
+const CLEAN_ORDER_SECTORS = ['거실', '침실1', '침실2', '침실3', '주방', '세탁실']
+
+// 가구 장애물 — bounding box 실측 기반, r = max(size.x, size.z)/2 + 여유
+// DE_001_007* 는 문 패널(얇음) 또는 섹터 밖이므로 제외
+const OBSTACLES: { x: number; z: number; r: number }[] = [
+  { x: 456.66, z: -16.23, r: 0.35 }, // Plane016_3    size 0.61×0.61
+  // Plane011 제외: y=0.89(높이 82cm) 카운터 상판 → 로봇이 하부 통과 가능
+  { x: 460.60, z: -16.87, r: 0.40 }, // WashingMachine size 0.64×0.69
+  { x: 465.62, z: -16.77, r: 0.30 }, // Rectangle010005 size 0.37×0.55
+  { x: 465.45, z: -16.03, r: 1.10 }, // Rectangle010004 size 2.03×1.52 (장롱)
+  { x: 465.62, z: -14.61, r: 0.30 }, // Rectangle010001 size 0.37×0.55
+  { x: 459.88, z: -13.39, r: 0.97 }, // Cristalo004   size 1.88×1.90
+  { x: 460.99, z: -13.19, r: 0.50 }, // table_3_object size 0.91×0.54
+  { x: 461.17, z: -12.14, r: 1.30 }, // Cristalo001   size 2.57×2.52
+  { x: 464.39, z: -11.62, r: 1.38 }, // Component#262 size 2.70×2.66
+  { x: 457.94, z:  -8.80, r: 1.10 }, // default002002 size 1.73×2.12
+  { x: 456.81, z:  -7.93, r: 0.35 }, // Side_Table001 size 0.59×0.48
+  { x: 459.03, z:  -7.93, r: 0.35 }, // Side_Table005 size 0.59×0.48
+  { x: 464.03, z:  -8.58, r: 0.28 }, // Bed_nightstand001 size 0.47×0.39
+  { x: 463.87, z:  -8.58, r: 0.28 }, // Bed_nightstand002 size 0.47×0.39
+  { x: 463.92, z:  -8.74, r: 1.00 }, // Bed_nightstand size 1.82×1.98 (침대 본체)
 ]
 
-const DOCK: Pt = { x: 480, y: 314 }
+// 직사각형 장애물 — 얇은 벽처럼 x/z 범위 직접 지정
+const RECT_OBSTACLES: { x0: number; x1: number; z0: number; z1: number }[] = [
+  { x0: 463.63, x1: 463.73, z0: -13.5, z1: -13.1 }, // 커스텀 벽 (x=463.68, z=-13.5~-13.1)
+]
+
+function isNearObstacle(x: number, z: number): boolean {
+  if (OBSTACLES.some(o => {
+    const dx = x - o.x, dz = z - o.z
+    return dx * dx + dz * dz < o.r * o.r
+  })) return true
+  return RECT_OBSTACLES.some(r => x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1)
+}
+
+// 문 위치 반경 — 섹터 경계 틈새를 메워서 BFS가 문을 통과할 수 있게 함
+const DOOR_RADIUS = 0.4
+
+function isNearAnyDoor(x: number, z: number): boolean {
+  return Object.values(DOORS).some(d => {
+    const dx = x - d.x, dz = z - d.y
+    return dx * dx + dz * dz < DOOR_RADIUS * DOOR_RADIUS
+  })
+}
+
+// 어떤 구역 폴리곤 안에 있거나 문 근처면 이동 가능 (벽 통과 방지)
+function isInAnyRoom(x: number, z: number): boolean {
+  return Object.values(SECTOR_POLYS).some(poly => pointInPolygon(x, z, poly))
+    || isNearAnyDoor(x, z)
+}
 
 /* ─── 유틸 ────────────────────────────────────────────── */
 
-function clampToHouse(pt: Pt): Pt {
-  const { x, y } = pt
-  if (x >= 549) return { x: Math.max(551, Math.min(889, x)), y: Math.max(32, Math.min(377, y)) }
-  return { x: Math.max(32, Math.min(547, x)), y: Math.max(32, Math.min(406, y)) }
+// Ray-casting 방식 폴리곤 포함 판단
+function pointInPolygon(px: number, pz: number, poly: [number, number][]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i], [xj, zj] = poly[j]
+    if ((zi > pz) !== (zj > pz) && px < (xj - xi) * (pz - zi) / (zj - zi) + xi)
+      inside = !inside
+  }
+  return inside
 }
 
-function getRoomIds(zone: string | string[] | null): RoomId[] {
-  if (!zone || zone === 'all') return ZONE_ROOMS.all
-  if (Array.isArray(zone)) return [...new Set(zone.flatMap(z => ZONE_ROOMS[z] ?? [z as RoomId]))]
-  return ZONE_ROOMS[zone] ?? [zone as RoomId]
-}
-
-function detectRoom(x: number, y: number): RoomId | null {
-  if (x >= 30  && x <= 138 && y >= 30  && y <= 86 ) return 'bathroom'
-  if (x >= 138 && x <= 213 && y >= 30  && y <= 86 ) return 'dressing_room'
-  if (x >= 422 && x <= 469 && y >= 196 && y <= 258) return 'bathroom2'
-  if (x >= 469 && x <= 549 && y >= 196 && y <= 340) return 'family_room'
-  if (x >= 174 && x <= 294 && y >= 196 && y <= 340) return 'bedroom3'
-  if (x >= 294 && x <= 469 && y >= 196 && y <= 340) return 'bedroom4'
-  if (x >= 30  && x <= 174 && y >= 86  && y <= 340) return 'bedroom1'
-  if (x >= 174 && x <= 549 && y >= 86  && y <= 196) return 'hallway'
-  if (x >= 549 && x <= 891 && y >= 30  && y <= 379) return 'living_room'
+// 현재 3D 좌표가 속한 구역명 반환
+function detectSector(x: number, z: number): string | null {
+  for (const [name, poly] of Object.entries(SECTOR_POLYS)) {
+    if (pointInPolygon(x, z, poly)) return name
+  }
   return null
 }
 
-function findRoomPath(from: RoomId, to: RoomId): RoomId[] {
+// zone 문자열 → 구역명 배열
+function getSectorNames(zone: string | string[] | null): string[] {
+  if (!zone || zone === 'all') return CLEAN_ORDER_SECTORS
+  if (Array.isArray(zone)) return [...new Set(zone.flatMap(z => ZONE_SECTORS[z] ?? [z]))]
+  return ZONE_SECTORS[zone] ?? [zone]
+}
+
+// 청소 순서에 맞게 필터링
+function getCleaningOrder(zone: string | string[] | null): string[] {
+  const names = getSectorNames(zone)
+  return CLEAN_ORDER_SECTORS.filter(s => names.includes(s))
+}
+
+// 두 점 사이를 step 간격으로 보간
+function interpolatePath(from: Pt, to: Pt, step = 0.25): Pt[] {
+  const dx = to.x - from.x, dz = to.y - from.y
+  const dist = Math.sqrt(dx * dx + dz * dz)
+  if (dist <= step) return [to]
+  const n = Math.ceil(dist / step)
+  const pts: Pt[] = []
+  for (let i = 1; i <= n; i++) pts.push({ x: from.x + dx * i / n, y: from.y + dz * i / n })
+  return pts
+}
+
+// 장애물 우회 경로 — BFS 격자 탐색
+// 직선 경로가 장애물을 통과하면 옆으로 돌아가는 경로를 반환
+const _PSTEP = 0.10                                     // 격자 0.10m → 좁은 통로 탐색 가능
+const _GX0 = 455.0
+const _GZ0 = -18.0
+const _GX_MAX = Math.ceil((467 - _GX0) / _PSTEP) + 2  // ~122
+const _GZ_MAX = Math.ceil((-7  - _GZ0) / _PSTEP) + 2  // ~112
+const _DIRS8: [number, number][] = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]
+
+function _wToG(x: number, z: number): [number, number] {
+  return [Math.round((x - _GX0) / _PSTEP), Math.round((z - _GZ0) / _PSTEP)]
+}
+function _gToW(gx: number, gz: number): Pt {
+  return { x: _GX0 + gx * _PSTEP, y: _GZ0 + gz * _PSTEP }
+}
+function _inBounds(gx: number, gz: number): boolean {
+  return gx >= -2 && gx <= _GX_MAX && gz >= -2 && gz <= _GZ_MAX
+}
+
+// poly를 넘기면 해당 구역 폴리곤 안에서만 우회.
+// poly가 있을 때는 어떤 경우에도 섹터 밖 경로를 반환하지 않음 (최우선).
+function findPath(from: Pt, to: Pt, poly?: [number, number][]): Pt[] {
+  const straight = interpolatePath(from, to, _PSTEP)
+
+  // 직선 경로가 장애물 없고 섹터/방 안에 있으면 그대로 사용
+  const straightOk = straight.every(p =>
+    !isNearObstacle(p.x, p.y) &&
+    (poly ? pointInPolygon(p.x, p.y, poly) : isInAnyRoom(p.x, p.y))
+  )
+  if (straightOk) return straight
+
+  const [sx, sz] = _wToG(from.x, from.y)
+  const [ex, ez] = _wToG(to.x, to.y)
+  if (sx === ex && sz === ez) return [to]
+
+  // 목표 셀이 장애물 내부 → 섹터 제약 있으면 스킵, 없으면 방 안 점만 추려서 반환
+  if (isNearObstacle(_gToW(ex, ez).x, _gToW(ex, ez).y)) {
+    if (poly) return []
+    const f = straight.filter(p => isInAnyRoom(p.x, p.y))
+    return f.length > 0 ? f : [to]
+  }
+
+  const parent = new Map<string, string | null>()
+  const queue: [number, number][] = [[sx, sz]]
+  const key = (gx: number, gz: number) => `${gx},${gz}`
+  parent.set(key(sx, sz), null)
+  let found = false
+
+  outer: while (queue.length > 0) {
+    const [cx, cz] = queue.shift()!
+    for (const [dx, dz] of _DIRS8) {
+      const nx = cx + dx, nz = cz + dz
+      if (!_inBounds(nx, nz)) continue
+      const nk = key(nx, nz)
+      if (parent.has(nk)) continue
+      const wp = _gToW(nx, nz)
+      if (isNearObstacle(wp.x, wp.y)) continue
+      const isTarget = nx === ex && nz === ez
+      // 목표 셀은 경계 위에 있을 수 있으므로 room/sector 체크 면제
+      if (!isTarget) {
+        if (poly ? !pointInPolygon(wp.x, wp.y, poly) : !isInAnyRoom(wp.x, wp.y)) continue
+      }
+      parent.set(nk, key(cx, cz))
+      if (isTarget) { found = true; break outer }
+      queue.push([nx, nz])
+    }
+  }
+
+  // 경로 못 찾음 → 섹터 제약 있으면 스킵(이탈 금지), 없으면 방 안 점만 추려서 반환
+  if (!found) {
+    if (poly) return []
+    const f = straight.filter(p => isInAnyRoom(p.x, p.y))
+    return f.length > 0 ? f : [to]
+  }
+
+  const path: Pt[] = []
+  let cur: string | null = key(ex, ez)
+  const startK = key(sx, sz)
+  while (cur && cur !== startK) {
+    const [gx, gz] = cur.split(',').map(Number)
+    path.unshift(_gToW(gx, gz))
+    cur = parent.get(cur) ?? null
+  }
+  return path.length > 0 ? path : (poly ? [] : straight)
+}
+
+// 구역 내 지그재그 청소 경로 (폴리곤 안쪽만, L자형도 자동 처리)
+function generateZigzagInSector(poly: [number, number][], rowStep = 0.30): Pt[] {
+  const xs = poly.map(p => p[0]), zs = poly.map(p => p[1])
+  const x0 = Math.min(...xs), x1 = Math.max(...xs)
+  const z0 = Math.min(...zs), z1 = Math.max(...zs)
+  const pts: Pt[] = []
+  let rowIdx = 0
+  for (let z = z0 + rowStep / 2; z <= z1; z += rowStep) {
+    const row: Pt[] = []
+    for (let x = x0 + rowStep / 2; x <= x1; x += rowStep) {
+      if (pointInPolygon(x, z, poly) && !isNearObstacle(x, z)) row.push({ x, y: z })
+    }
+    if (row.length > 0) {
+      pts.push(...(rowIdx % 2 === 0 ? row : [...row].reverse()))
+      rowIdx++
+    }
+  }
+  return pts
+}
+
+// BFS로 구역 간 최단 경로 탐색
+function findSectorPath(from: string, to: string): string[] {
   if (from === to) return [from]
-  const visited = new Set<RoomId>([from])
-  const queue: RoomId[][] = [[from]]
+  const visited = new Set<string>([from])
+  const queue: string[][] = [[from]]
   while (queue.length > 0) {
     const path = queue.shift()!
     const cur = path[path.length - 1]
-    for (const nb of Object.keys(ROOMS[cur]?.doors ?? {}) as RoomId[]) {
+    for (const nb of SECTOR_GRAPH[cur] ?? []) {
       if (nb === to) return [...path, nb]
       if (!visited.has(nb)) { visited.add(nb); queue.push([...path, nb]) }
     }
@@ -131,84 +282,72 @@ function findRoomPath(from: RoomId, to: RoomId): RoomId[] {
   return [from, to]
 }
 
-function buildPath(fromRoom: RoomId | null, toRoom: RoomId, target: Pt): Pt[] {
-  if (!fromRoom || fromRoom === toRoom) return [target]
-  const roomPath = findRoomPath(fromRoom, toRoom)
+// 구역 간 문 경유점 반환 (보간 없이 waypoint만)
+function getNavDoors(fromSector: string | null, toSector: string): Pt[] {
+  if (!fromSector || fromSector === toSector) return []
+  const route = findSectorPath(fromSector, toSector)
   const pts: Pt[] = []
-  for (let i = 0; i < roomPath.length - 1; i++) {
-    const exitPt  = ROOMS[roomPath[i]]?.doors[roomPath[i + 1]]
-    const entryPt = ROOMS[roomPath[i + 1]]?.doors[roomPath[i]]
-    if (exitPt)  pts.push(clampToHouse(exitPt))
-    if (entryPt) pts.push(clampToHouse(entryPt))
+  for (let i = 0; i < route.length - 1; i++) {
+    const door = DOORS[`${route[i]}-${route[i+1]}`] ?? DOORS[`${route[i+1]}-${route[i]}`]
+    if (door) pts.push(door)
   }
-  pts.push(clampToHouse(target))
   return pts
 }
 
-function generateSpiralPath(x: number, y: number, w: number, h: number, step = 20): Pt[] {
-  const pts: Pt[] = []
-  let cx = x, cy = y, cw = w, ch = h
-  while (cw >= step && ch >= step) {
-    pts.push({ x: cx,      y: cy      })
-    pts.push({ x: cx,      y: cy + ch })
-    pts.push({ x: cx + cw, y: cy + ch })
-    pts.push({ x: cx + cw, y: cy      })
-    cx += step; cy += step; cw -= 2 * step; ch -= 2 * step
-  }
-  if (cw > 0 && ch > 0) pts.push({ x: Math.round(cx + cw / 2), y: Math.round(cy + ch / 2) })
-  return pts
-}
-
-function getCleaningOrder(zone: string | string[] | null): RoomId[] {
-  return CLEAN_ORDER.filter(r => getRoomIds(zone).includes(r))
-}
-
-function buildSpiralCleaningPath(rooms: RoomId[], startRoom: RoomId | null): Pt[] {
+// 전체 청소 경로: 현재위치→문(보간)→구역(지그재그, 행간 보간)
+function buildFullCleaningPath(sectors: string[], currentSector: string | null, startPos: Pt): Pt[] {
   const allPts: Pt[] = []
-  let prevRoom = startRoom
-  for (const roomId of rooms) {
-    const b = SPIRAL_BOUNDS[roomId]
-    if (!b) continue
-    if (b.w < 20 || b.h < 20) {
-      const center: Pt = { x: Math.round(b.x + b.w / 2), y: Math.round(b.y + b.h / 2) }
-      allPts.push(...buildPath(prevRoom, roomId, center))
-      prevRoom = roomId
-      continue
+  let prevPos = startPos
+  let prev = currentSector
+
+  for (const name of sectors) {
+    const poly = SECTOR_POLYS[name]
+    if (!poly) continue
+
+    // 현재 위치 → 목적 구역 문까지 우회 이동
+    for (const door of getNavDoors(prev, name)) {
+      allPts.push(...findPath(prevPos, door))
+      prevPos = door
     }
-    const spiralPts = generateSpiralPath(b.x, b.y, b.w, b.h)
-    if (spiralPts.length === 0) continue
-    allPts.push(...buildPath(prevRoom, roomId, spiralPts[0]))
-    allPts.push(...spiralPts.slice(1))
-    prevRoom = roomId
+
+    // 문 → 청소 지점 이동 (행 전환 시 해당 구역 안에서만 우회)
+    const cleanPts = generateZigzagInSector(poly)
+    for (const pt of cleanPts) {
+      const dx = Math.abs(pt.x - prevPos.x), dz = Math.abs(pt.y - prevPos.y)
+      const dist = Math.sqrt(dx * dx + dz * dz)
+      if (dist > 0.5) {
+        const seg = findPath(prevPos, pt, poly)
+        allPts.push(...seg)
+        if (seg.length > 0) prevPos = pt  // 경로 없으면 prevPos 유지 (순간이동 방지)
+      } else {
+        allPts.push(pt)
+        prevPos = pt
+      }
+    }
+
+    prev = name
   }
   return allPts
 }
 
-/* ─── SVG 2D → 3D 좌표 변환 ──────────────────────────────
- *
- * GLB 실측 앵커:
- *   RobotVacuum003 world pos : (459.92,  0.00, -15.08)
- *   Robot cleaner..003 local : ( 0.00,   0.00, +0.267)  → world (459.92, 0, -14.81)
- *
- *   SVG DOCK (480, 314) ↔ 3D robot body (459.92, 0, -14.81)
- *
- * 스케일:
- *   3D 방 X 범위 ≈ 456~466  (10 unit) / SVG 하우스 X 30~891 (861 px)
- *   3D 방 Z 범위 ≈ -8~-17   (9 unit)  / SVG 하우스 Y 30~379 (349 px)
- *   SVG Y 증가 → 3D Z 감소 (더 깊숙이)
- */
-const SVG_DOCK: Pt    = { x: 480, y: 314 }
-const D3_DOCK_X       = 459.92
-const D3_DOCK_Z       = -14.81
-const SCALE_X         = 10 / 861
-const SCALE_Z         = -9 / 349
+// 복귀 경로: 현재위치→문(보간)→도킹(보간)
+function buildReturnPath(currentSector: string | null, startPos: Pt): Pt[] {
+  const dockSector = detectSector(DOCK.x, DOCK.y) ?? '거실'
+  const waypoints = [...getNavDoors(currentSector, dockSector), DOCK]
+  const allPts: Pt[] = []
+  let prevPos = startPos
+  for (const wp of waypoints) {
+    allPts.push(...findPath(prevPos, wp))
+    prevPos = wp
+  }
+  return allPts
+}
 
+/* ─── 3D 좌표 변환 ────────────────────────────────────────
+ * rvPos가 이제 3D 세계 좌표이므로 직접 THREE.Vector3로 변환
+ */
 function svgTo3D(pt: Pt): THREE.Vector3 {
-  return new THREE.Vector3(
-    D3_DOCK_X + (pt.x - SVG_DOCK.x) * SCALE_X,
-    0.02,
-    D3_DOCK_Z + (pt.y - SVG_DOCK.y) * SCALE_Z,
-  )
+  return new THREE.Vector3(pt.x, 0.02, pt.y)
 }
 
 /* ─── Three.js 컴포넌트 ─────────────────────────────────── */
@@ -315,10 +454,10 @@ function RobotMover({ rvPos, rv }: { rvPos: Pt; rv: RobotVacuumState }) {
   }, [rvPos])
 
   const label =
-    rv.action === 'cleaning'  ? '청소 중'  :
-    rv.action === 'docked'    ? '충전 중'  :
-    rv.action === 'returning' ? '복귀 중'  :
-    rv.action === 'paused'    ? '일시정지' : '대기'
+    rv.status === 'cleaning'  ? '청소 중'  :
+    rv.status === 'docked'    ? '충전 중'  :
+    rv.status === 'returning' ? '복귀 중'  :
+    rv.status === 'paused'    ? '일시정지' : '대기'
 
   const pos3D = svgTo3D(rvPos)
 
@@ -386,8 +525,18 @@ function drawTVContent(canvas: HTMLCanvasElement, tv: TVState) {
 
   const raw = (tv.content_name || tv.channel || '').trim()
   if (!raw) {
-    ctx.fillStyle = '#111'
+    // 대기 화면 (전원 ON, 콘텐츠 미선택)
+    ctx.fillStyle = '#0a1628'
     ctx.fillRect(0, 0, W, H)
+    ctx.save()
+    ctx.translate(0, H)
+    ctx.scale(1, -1)
+    ctx.font = 'bold 96px Arial, sans-serif'
+    ctx.fillStyle = 'rgba(255,255,255,0.15)'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('TV', W / 2, H / 2)
+    ctx.restore()
     return
   }
 
@@ -430,14 +579,23 @@ function TVScreen() {
     const texture = new THREE.CanvasTexture(canvas)
     textureRef.current = texture
 
+    let found = false
     scene.traverse((child) => {
-      if (
-        child instanceof THREE.Mesh &&
-        (child.material as THREE.Material).name === 'TV_Screen'
-      ) {
-        child.material = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false })
-      }
+      if (!(child instanceof THREE.Mesh)) return
+      const mats = Array.isArray(child.material) ? child.material : [child.material]
+      mats.forEach((mat, idx) => {
+        if ((mat as THREE.Material).name === 'TV_Screen') {
+          const newMat = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false })
+          if (Array.isArray(child.material)) {
+            ;(child.material as THREE.Material[])[idx] = newMat
+          } else {
+            child.material = newMat
+          }
+          found = true
+        }
+      })
     })
+    if (!found) console.warn('[TVScreen] TV_Screen 재질을 찾지 못했습니다')
 
     drawTVContent(canvas, tv)
     texture.needsUpdate = true
@@ -617,46 +775,154 @@ function DeviceLabels() {
 
 /* ─── 섹터 디버그 시각화 ─────────────────────────────────── */
 
-const SECTORS = [
-  { name: '주방',  x1: 455,   x2: 460.5, z1: -18,   z2: -13.5, color: '#facc15' },
-  { name: '거실',  x1: 460.5, x2: 467,   z1: -17.5, z2: -12,   color: '#60a5fa' },
-  { name: '침실1', x1: 455,   x2: 460.5, z1: -13.5, z2: -9,    color: '#4ade80' },
-  { name: '침실2', x1: 460.5, x2: 464,   z1: -10.5, z2: -7.5,  color: '#f87171' },
-  { name: '침실3', x1: 464,   x2: 467,   z1: -10.5, z2: -7.5,  color: '#c084fc' },
+// 섹터 색상 — SECTOR_POLYS가 단일 좌표 원본이므로 색상만 별도 관리
+const SECTOR_COLORS: Record<string, string> = {
+  주방:  '#ec4899',
+  세탁실: '#14b8a6',
+  침실3: '#eab308',
+  거실:  '#3b82f6',
+  침실1: '#a855f7',
+  침실2: '#eab308',
+}
+
+// 문 시각화는 고정 좌표 (경로 계획에 미사용)
+const DOOR_SECTORS = [
+  { name: '문(주방↔거실)',   points: [[458.7,-14.85],[459.6,-14.85],[459.6,-14.75],[458.7,-14.75]] as [number,number][] },
+  { name: '문(주방↔세탁실)', points: [[459.6,-16.6],[459.75,-16.6],[459.75,-15.8],[459.6,-15.8]] as [number,number][] },
+  { name: '문(침실2↔거실)',  points: [[459.3,-11.1],[459.4,-11.1],[459.4,-10.3],[459.3,-10.3]] as [number,number][] },
+  { name: '문(침실1↔거실)',  points: [[462.6,-11.1],[462.7,-11.1],[462.7,-10.3],[462.6,-10.3]] as [number,number][] },
+  { name: '문(침실3↔거실)',  points: [[462.7,-13.55],[463.6,-13.55],[463.6,-13.45],[462.7,-13.45]] as [number,number][] },
 ]
+
+interface SectorDef { name: string; points: [number, number][]; color: string }
+
+function SectorMesh({ name, points, color }: SectorDef) {
+  const shape = useMemo(() => {
+    const s = new THREE.Shape()
+    s.moveTo(points[0][0], points[0][1])
+    for (let i = 1; i < points.length; i++) s.lineTo(points[i][0], points[i][1])
+    s.closePath()
+    return s
+  }, [points])
+
+  const cx = points.reduce((s, p) => s + p[0], 0) / points.length
+  const cz = points.reduce((s, p) => s + p[1], 0) / points.length
+
+  return (
+    <group>
+      <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
+        <shapeGeometry args={[shape]} />
+        <meshBasicMaterial color={color} transparent opacity={0.2} side={THREE.DoubleSide} />
+      </mesh>
+      <Html center position={[cx, 0.25, cz]}>
+        <div style={{
+          color,
+          fontSize: 11,
+          fontWeight: 'bold',
+          fontFamily: 'sans-serif',
+          whiteSpace: 'nowrap',
+          textShadow: '0 0 4px #000',
+          pointerEvents: 'none',
+        }}>
+          {name}
+        </div>
+      </Html>
+    </group>
+  )
+}
 
 function SectorDebug() {
   return (
     <>
-      {SECTORS.map(({ name, x1, x2, z1, z2, color }) => {
-        const cx = (x1 + x2) / 2
-        const cz = (z1 + z2) / 2
-        const w  = x2 - x1
-        const d  = Math.abs(z2 - z1)
-        return (
-          <group key={name}>
-            <mesh position={[cx, 0.05, cz]}>
-              <boxGeometry args={[w, 0.1, d]} />
-              <meshBasicMaterial color={color} transparent opacity={0.2} />
-            </mesh>
-            <Html center position={[cx, 0.25, cz]}>
-              <div style={{
-                color,
-                fontSize: 11,
-                fontWeight: 'bold',
-                fontFamily: 'sans-serif',
-                whiteSpace: 'nowrap',
-                textShadow: '0 0 4px #000',
-                pointerEvents: 'none',
-              }}>
-                {name}
-              </div>
-            </Html>
-          </group>
-        )
-      })}
+      {Object.entries(SECTOR_POLYS).map(([name, points]) => (
+        <SectorMesh key={name} name={name} points={points} color={SECTOR_COLORS[name] ?? '#888888'} />
+      ))}
+      {DOOR_SECTORS.map((d) => (
+        <SectorMesh key={d.name} name={d.name} points={d.points} color="#84cc16" />
+      ))}
     </>
   )
+}
+
+/* ─── 씬 호버 컨트롤러 ───────────────────────────────────────
+ * gl.domElement의 pointermove/pointerleave로 raycasting을 수행하고,
+ * 히트된 Mesh의 material을 클론 후 노란색으로 하이라이트.
+ * 마우스를 떼면 원래 color로 복원.
+ */
+function SceneHover({ onHover }: { onHover: (info: HoveredInfo | null) => void }) {
+  const { scene, gl, camera } = useThree()
+  const raycaster = useMemo(() => new THREE.Raycaster(), [])
+  const origColorMap = useRef(new Map<THREE.Mesh, THREE.Color>())
+  const hoveredRef = useRef<THREE.Mesh | null>(null)
+  const onHoverRef = useRef(onHover)
+  useEffect(() => { onHoverRef.current = onHover })
+
+  useEffect(() => {
+    const el = gl.domElement
+
+    const restoreMesh = (mesh: THREE.Mesh) => {
+      const orig = origColorMap.current.get(mesh)
+      const mat = mesh.material
+      if (orig && !Array.isArray(mat) && 'color' in mat) {
+        (mat as THREE.MeshStandardMaterial).color.copy(orig)
+      }
+    }
+
+    const onPointerMove = (e: PointerEvent) => {
+      const rect = el.getBoundingClientRect()
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      )
+      raycaster.setFromCamera(ndc, camera)
+      const intersects = raycaster.intersectObjects(scene.children, true)
+      const hit = intersects.length > 0 ? (intersects[0].object as THREE.Mesh) : null
+
+      if (hit === hoveredRef.current) return
+
+      if (hoveredRef.current) restoreMesh(hoveredRef.current)
+      hoveredRef.current = hit
+
+      if (hit) {
+        const mat = hit.material
+        if (!Array.isArray(mat) && 'color' in mat) {
+          if (!origColorMap.current.has(hit)) {
+            // 공유 material 변경 방지를 위해 클론
+            const cloned = (mat as THREE.MeshStandardMaterial).clone()
+            hit.material = cloned
+            origColorMap.current.set(hit, (cloned as THREE.MeshStandardMaterial).color.clone())
+          }
+          ;(hit.material as THREE.MeshStandardMaterial).color.set('#ffff00')
+        }
+        const wp = new THREE.Vector3()
+        hit.getWorldPosition(wp)
+        const box = new THREE.Box3().setFromObject(hit)
+        const size = box.getSize(new THREE.Vector3())
+        onHoverRef.current({
+          name: hit.name || '(unnamed)',
+          parentName: hit.parent?.name ?? '',
+          position: wp,
+          size,
+        })
+      } else {
+        onHoverRef.current(null)
+      }
+    }
+
+    const onPointerLeave = () => {
+      if (hoveredRef.current) { restoreMesh(hoveredRef.current); hoveredRef.current = null }
+      onHoverRef.current(null)
+    }
+
+    el.addEventListener('pointermove', onPointerMove)
+    el.addEventListener('pointerleave', onPointerLeave)
+    return () => {
+      el.removeEventListener('pointermove', onPointerMove)
+      el.removeEventListener('pointerleave', onPointerLeave)
+    }
+  }, [gl, camera, raycaster, scene])
+
+  return null
 }
 
 /* ─── 메인 컴포넌트 ──────────────────────────────────────── */
@@ -665,51 +931,61 @@ export function RoomSimulator() {
   const rv = useDeviceStore((s) => s.devices.robot_vacuum)
 
   const [rvPos, setRvPos] = useState<Pt>(DOCK)
-  const currentRoomRef   = useRef<RoomId | null>('family_room')
+  const currentSectorRef = useRef<string | null>('거실')
   const pathRef          = useRef<Pt[]>([])
   const timerRef         = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rvRef            = useRef(rv)
+  const rvPosRef         = useRef<Pt>(DOCK)   // 최신 위치 항상 추적
   useEffect(() => { rvRef.current = rv })
+  useEffect(() => { rvPosRef.current = rvPos }, [rvPos])
 
-  const handleBox = useCallback((_b: THREE.Box3) => {}, [])  // Bounds 컴포넌트 필요
+  const [hoveredInfo, setHoveredInfo] = useState<HoveredInfo | null>(null)
+  const handleHover = useCallback((info: HoveredInfo | null) => setHoveredInfo(info), [])
+
+  const handleBox = useCallback((_b: THREE.Box3) => {}, [])
 
   useEffect(() => {
     const clear = () => {
       if (timerRef.current !== null) { clearTimeout(timerRef.current); timerRef.current = null }
     }
 
-    const triggerReturnToDock = () => {
+    const setStatus = (status: string) => {
       fetch('/api/v1/command/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device: 'robot_vacuum', parameters: { action: 'return_to_dock' } }),
+        body: JSON.stringify({ device: 'robot_vacuum', parameters: { status } }),
       }).catch(() => {})
     }
 
+    const STEP_MS = 100
+
     const cleanStep = () => {
-      if (rvRef.current.action !== 'cleaning') return
+      if (rvRef.current.status !== 'cleaning') return
       if (pathRef.current.length > 0) {
-        const next = clampToHouse(pathRef.current.shift()!)
+        const next = pathRef.current.shift()!
         setRvPos(next)
-        currentRoomRef.current = detectRoom(next.x, next.y) ?? currentRoomRef.current
-        timerRef.current = setTimeout(cleanStep, 800)
+        currentSectorRef.current = detectSector(next.x, next.y) ?? currentSectorRef.current
+        timerRef.current = setTimeout(cleanStep, STEP_MS)
       } else {
-        triggerReturnToDock()
+        // 청소 완료 → 복귀 시작
+        setStatus('returning')
       }
     }
 
     const returnToDock = () => {
-      const dockRoom = detectRoom(DOCK.x, DOCK.y) ?? 'family_room'
-      pathRef.current = buildPath(currentRoomRef.current, dockRoom, DOCK)
+      // rvPosRef로 현재 위치를 정확히 읽음 (클로저 스테일 방지)
+      pathRef.current = buildReturnPath(currentSectorRef.current, rvPosRef.current)
       const dockStep = () => {
         if (pathRef.current.length > 0) {
-          const next = clampToHouse(pathRef.current.shift()!)
+          const next = pathRef.current.shift()!
           setRvPos(next)
-          currentRoomRef.current = detectRoom(next.x, next.y) ?? currentRoomRef.current
-          timerRef.current = setTimeout(dockStep, 800)
+          currentSectorRef.current = detectSector(next.x, next.y) ?? currentSectorRef.current
+          timerRef.current = setTimeout(dockStep, STEP_MS)
         } else {
           setRvPos(DOCK)
-          currentRoomRef.current = 'family_room'
+          currentSectorRef.current = detectSector(DOCK.x, DOCK.y) ?? '거실'
+          // 도킹 완료 → 백엔드 상태 갱신
+          setStatus('docked')
         }
       }
       dockStep()
@@ -718,21 +994,62 @@ export function RoomSimulator() {
     clear()
     pathRef.current = []
 
-    if (rv.action === 'cleaning') {
-      const startRoom = detectRoom(rvPos.x, rvPos.y) ?? 'family_room'
-      currentRoomRef.current = startRoom
-      pathRef.current = buildSpiralCleaningPath(getCleaningOrder(rv.zone), startRoom)
+    if (rv.status === 'cleaning') {
+      const startSector = detectSector(rvPosRef.current.x, rvPosRef.current.y) ?? '거실'
+      currentSectorRef.current = startSector
+      pathRef.current = buildFullCleaningPath(getCleaningOrder(rv.zone), startSector, rvPosRef.current)
       timerRef.current = setTimeout(cleanStep, 300)
-    } else if (rv.action === 'returning' || rv.action === 'docked') {
+    } else if (rv.status === 'returning') {
       returnToDock()
+    } else if (rv.status === 'docked') {
+      setRvPos(DOCK)
     }
 
     return clear
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rv.action, rv.zone])
+  }, [rv.status, rv.zone])
 
   return (
-    <div style={{ flex: 1, height: '100%', minHeight: 450 }}>
+    <div style={{ position: 'relative', flex: 1, height: '100%', minHeight: 450 }}>
+      {hoveredInfo && (
+        <div style={{
+          position: 'absolute',
+          top: 12,
+          left: 12,
+          zIndex: 10,
+          background: 'rgba(15,23,42,0.88)',
+          color: '#e2e8f0',
+          padding: '8px 12px',
+          borderRadius: 6,
+          fontSize: 12,
+          fontFamily: 'monospace',
+          whiteSpace: 'nowrap',
+          border: '1px solid rgba(148,163,184,0.3)',
+          pointerEvents: 'none',
+          lineHeight: 1.7,
+        }}>
+          <div style={{ color: '#fbbf24', fontWeight: 'bold', marginBottom: 2 }}>
+            {hoveredInfo.parentName
+              ? `${hoveredInfo.parentName} > ${hoveredInfo.name}`
+              : hoveredInfo.name}
+          </div>
+          <div style={{ color: '#94a3b8', fontSize: 11 }}>
+            pos &nbsp;x: {hoveredInfo.position.x.toFixed(2)}&ensp;
+            y: {hoveredInfo.position.y.toFixed(2)}&ensp;
+            z: {hoveredInfo.position.z.toFixed(2)}
+          </div>
+          <div style={{ color: '#34d399', fontSize: 11 }}>
+            size x: {hoveredInfo.size.x.toFixed(2)}&ensp;
+            y: {hoveredInfo.size.y.toFixed(2)}&ensp;
+            z: {hoveredInfo.size.z.toFixed(2)}
+          </div>
+          {hoveredInfo.parentName && (
+            <div style={{ color: '#64748b', fontSize: 10, marginTop: 1 }}>
+              parent: {hoveredInfo.parentName}
+            </div>
+          )}
+        </div>
+      )}
       <Canvas
         shadows
         camera={{ position: [461, 15, -3], fov: 50 }}
@@ -759,6 +1076,12 @@ export function RoomSimulator() {
           <AirPurifierWaves />
           <DeviceLabels />
           <SectorDebug />
+          <mesh position={[463.68, 0.5, -13.3]}>
+            <boxGeometry args={[0.1, 1.0, 0.4]} />
+            <meshBasicMaterial color="black" />
+          </mesh>
+
+          <SceneHover onHover={handleHover} />
         </Suspense>
 
         <OrbitControls

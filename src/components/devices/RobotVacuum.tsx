@@ -50,9 +50,9 @@ export function RobotVacuum({ state, x = 0, y = 0, obstacles = [] }: Props) {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const wpIndexRef = useRef(0)
 
-  const isCleaning = state.action === 'cleaning'
-  const isDocked = state.action === 'docked'
-  const isReturning = state.action === 'returning'
+  const isCleaning = state.status === 'cleaning'
+  const isDocked = state.status === 'docked'
+  const isReturning = state.status === 'returning'
 
   useEffect(() => {
     const clearPending = () => {
@@ -62,7 +62,7 @@ export function RobotVacuum({ state, x = 0, y = 0, obstacles = [] }: Props) {
       }
     }
 
-    if (state.action === 'cleaning') {
+    if (state.status === 'cleaning') {
       // 첫 번째 비충돌 waypoint로 즉시 이동
       wpIndexRef.current = 0
       setPos(WAYPOINTS[0])
@@ -92,18 +92,18 @@ export function RobotVacuum({ state, x = 0, y = 0, obstacles = [] }: Props) {
       return clearPending
     }
 
-    if (state.action === 'paused') {
+    if (state.status === 'paused') {
       // 현재 위치 고정, 예약 취소
       clearPending()
       return
     }
 
-    if (state.action === 'idle' || state.action === 'docked') {
+    if (state.status === 'idle' || state.status === 'docked') {
       clearPending()
       wpIndexRef.current = 0
       setPos({ x, y })
     }
-  }, [state.action, x, y]) // obstacles는 정적이므로 dep 제외
+  }, [state.status, x, y]) // obstacles는 정적이므로 dep 제외
 
   const bodyColor = isCleaning ? '#3b82f6' : isDocked ? '#22c55e' : '#9ca3af'
   const strokeColor = isCleaning ? '#93c5fd' : isDocked ? '#4ade80' : '#6b7280'
@@ -178,7 +178,7 @@ export function RobotVacuum({ state, x = 0, y = 0, obstacles = [] }: Props) {
       <text x={28} y={isCleaning && state.zone ? 84 : 74}
         fontSize={8} fill="#6b7280" textAnchor="middle">
         {isCleaning ? '청소 중' : isDocked ? '충전 중' : isReturning ? '복귀 중'
-          : state.action === 'paused' ? '일시정지' : '대기'}
+          : state.status === 'paused' ? '일시정지' : '대기'}
       </text>
     </g>
   )

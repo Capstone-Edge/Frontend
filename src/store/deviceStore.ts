@@ -25,8 +25,23 @@ interface DeviceStore {
 const DEFAULT_DEVICES: DeviceStates = {
   air_conditioner: { power: 'off', temperature: 24, mode: 'cool', fan_speed: 'auto', louver_angle: 'mid' },
   tv: { power: 'off', channel: null, content_name: null },
-  air_purifier: { power: 'off', mode: 'auto' },
-  robot_vacuum: { action: 'idle', zone: null, suction_power: 'standard', cleaning_mode: 'auto' },
+  air_purifier: { power: 'off', mode: 'auto', fan_speed: 'low', air_quality: 'good', pm25: 15, filter_status: 'clean' },
+  robot_vacuum: {
+    status: 'docked', battery_pct: 100, zone: null,
+    suction_power: 'standard', cleaning_mode: 'auto',
+    cleaned_area_m2: 0, position: { x: 0, y: 0 },
+    do_not_disturb: false, error: null,
+  },
+  oven: {
+    power: 'off', mode: 'bake', target_temp: 180, current_temp: 25,
+    timer_remaining: 0, fan_speed: 'off', steam: 'off',
+    probe_temp: 25, light: 'off', door: 'closed',
+  },
+  washing_machine: {
+    power: 'off', mode: 'standard', status: 'stopped',
+    remaining_time: 0, spin_speed: 'medium', door: 'closed',
+    water_temperature: 30, reservation_time: null, error: null,
+  },
 }
 
 let ws: WebSocket | null = null
