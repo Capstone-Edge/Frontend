@@ -76,7 +76,7 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/commands/parse', {
+      const res = await fetch('/api/v1/commands/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ device_id: 'edge-pi-01', stt_text: text }),
@@ -115,14 +115,12 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/dialogues/clarify', {
+      const res = await fetch('/api/v1/commands/process-clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          device_id: 'edge-pi-01',
           session_id: sessionId,
           user_answer: text,
-          clarification_turn: clarificationTurn,
         }),
       })
       if (!res.ok) throw new Error(`서버 오류 (${res.status})`)
@@ -152,20 +150,34 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   connectWebSocket: () => {
     if (ws && ws.readyState === WebSocket.OPEN) return
 
+    // 초기 기기 상태 로드
+    fetch('/api/v1/devices/state')
+      .then((r) => r.json())
+      .then((data: DeviceStates) => get().setDevices(data))
+      .catch(() => {})
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    ws = new WebSocket(`${protocol}//${window.location.host}/ws`)
+    ws = new WebSocket(`${protocol}//${window.location.host}/ws/device-states`)
 
     ws.onopen = () => get().setWsConnected(true)
     ws.onclose = () => {
       get().setWsConnected(false)
-      // 3초 후 재연결
       setTimeout(() => get().connectWebSocket(), 3000)
     }
     ws.onerror = () => ws?.close()
     ws.onmessage = (e) => {
       try {
-        const data = JSON.parse(e.data) as DeviceStates
-        get().setDevices(data)
+        const msg = JSON.parse(e.data)
+        if (msg.type === 'device_state_update' && msg.device_type) {
+          const current = get().devices
+          get().setDevices({
+            ...current,
+            [msg.device_type]: {
+              ...(current[msg.device_type as keyof DeviceStates] as object),
+              ...msg.state,
+            },
+          })
+        }
       } catch {}
     }
   },
