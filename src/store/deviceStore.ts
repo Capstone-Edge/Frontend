@@ -23,27 +23,24 @@ interface DeviceStore {
 }
 
 const DEFAULT_DEVICES: DeviceStates = {
-  air_conditioner: {
-    power: 'off',
-    temperature: 24,
-    mode: 'cool',
-    fan_speed: 'auto',
-    louver_angle: 'mid',
-  },
-  tv: {
-    power: 'off',
-    channel: null,
-    content_name: null,
-  },
-  air_purifier: {
-    power: 'off',
-    mode: 'auto',
-  },
+  air_conditioner: { power: 'off', temperature: 24, mode: 'cool', fan_speed: 'auto', louver_angle: 'mid' },
+  tv: { power: 'off', channel: null, content_name: null },
+  air_purifier: { power: 'off', mode: 'auto', fan_speed: 'low', air_quality: 'good', pm25: 15, filter_status: 'clean' },
   robot_vacuum: {
-    action: 'idle',
-    zone: null,
-    suction_power: 'standard',
-    cleaning_mode: 'auto',
+    status: 'docked', battery_pct: 100, zone: null,
+    suction_power: 'standard', cleaning_mode: 'auto',
+    cleaned_area_m2: 0, position: { x: 0, y: 0 },
+    do_not_disturb: false, error: null,
+  },
+  oven: {
+    power: 'off', mode: 'bake', target_temp: 180, current_temp: 25,
+    timer_remaining: 0, fan_speed: 'off', steam: 'off',
+    probe_temp: 25, light: 'off', door: 'closed',
+  },
+  washing_machine: {
+    power: 'off', mode: 'standard', status: 'stopped',
+    remaining_time: 0, spin_speed: 'medium', door: 'closed',
+    water_temperature: 30, reservation_time: null, error: null,
   },
 }
 
@@ -87,7 +84,7 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/commands/parse', {
+      const res = await fetch('/api/v1/commands/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -149,14 +146,12 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/dialogues/clarify', {
+      const res = await fetch('/api/v1/commands/process-clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          device_id: 'edge-pi-01',
           session_id: sessionId,
           user_answer: text,
-          clarification_turn: clarificationTurn,
         }),
       })
 
@@ -201,23 +196,35 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
       return
     }
 
-    ws = new WebSocket('ws://127.0.0.1:8000/ws/device-states')
+    // 초기 기기 상태 로드
+    fetch('/api/v1/devices/state')
+      .then((r) => r.json())
+      .then((data: DeviceStates) => get().setDevices(data))
+      .catch(() => {})
 
-    ws.onopen = () => {
-      console.log('[WebSocket] connected')
-      get().setWsConnected(true)
-    }
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    ws = new WebSocket(`${protocol}//${window.location.host}/ws/device-states`)
 
     ws.onclose = () => {
       console.log('[WebSocket] disconnected')
       get().setWsConnected(false)
-
       setTimeout(() => get().connectWebSocket(), 3000)
     }
-
-    ws.onerror = (error) => {
-      console.error('[WebSocket] error:', error)
-      ws?.close()
+    ws.onerror = () => ws?.close()
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data)
+        if (msg.type === 'device_state_update' && msg.device_type) {
+          const current = get().devices
+          get().setDevices({
+            ...current,
+            [msg.device_type]: {
+              ...(current[msg.device_type as keyof DeviceStates] as object),
+              ...msg.state,
+            },
+          })
+        }
+      } catch {}
     }
 
       ws.onmessage = (e) => {

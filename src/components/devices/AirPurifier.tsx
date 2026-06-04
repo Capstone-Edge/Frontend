@@ -7,16 +7,21 @@ interface Props {
 }
 
 const MODE_COLORS: Record<string, string> = {
-  auto: '#22c55e',
-  quiet: '#86efac',
-  standard: '#4ade80',
-  strong: '#16a34a',
-  turbo: '#15803d',
+  auto:   '#22c55e',
+  manual: '#4ade80',
+  sleep:  '#86efac',
+}
+
+const AIR_QUALITY_COLORS: Record<string, string> = {
+  good:     '#22c55e',
+  moderate: '#f59e0b',
+  poor:     '#ef4444',
 }
 
 export function AirPurifier({ state, x = 0, y = 0 }: Props) {
   const isOn = state.power === 'on'
   const bodyColor = isOn ? (MODE_COLORS[state.mode] || '#22c55e') : '#9ca3af'
+  const aqColor = AIR_QUALITY_COLORS[state.air_quality] || '#22c55e'
 
   return (
     <g transform={`translate(${x}, ${y})`}>
@@ -37,11 +42,13 @@ export function AirPurifier({ state, x = 0, y = 0 }: Props) {
         <rect key={i} x={11} y={12 + i * 5} width={28} height={2} rx={1} fill={isOn ? '#ffffff55' : '#ffffff33'} />
       ))}
 
-      {/* 중앙 팬 표시 */}
+      {/* 중앙 팬 */}
       <circle cx={25} cy={50} r={12} fill={isOn ? '#ffffff33' : '#ffffff11'} />
       {isOn && (
         <g transform={`translate(25, 50)`}>
-          <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="2s" repeatCount="indefinite" additive="sum" />
+          <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0"
+            dur={state.fan_speed === 'high' ? '0.8s' : state.fan_speed === 'medium' ? '1.5s' : '3s'}
+            repeatCount="indefinite" additive="sum" />
           {[0, 60, 120, 180, 240, 300].map((angle) => (
             <line key={angle} x1={0} y1={0} x2={0} y2={-9}
               stroke="white" strokeWidth={2} strokeLinecap="round"
@@ -59,15 +66,22 @@ export function AirPurifier({ state, x = 0, y = 0 }: Props) {
       {/* 전원 LED */}
       <circle cx={25} cy={84} r={3} fill={isOn ? '#4ade80' : '#374151'} />
 
+      {/* PM2.5 표시 (켜진 경우) */}
+      {isOn && (
+        <text x={25} y={100} fontSize={7} fill={aqColor} textAnchor="middle" fontWeight="bold">
+          PM2.5 {state.pm25}
+        </text>
+      )}
+
       {/* 모드 텍스트 */}
       {isOn && (
-        <text x={25} y={100} fontSize={8} fill="#15803d" textAnchor="middle" fontWeight="bold">
+        <text x={25} y={isOn ? 109 : 100} fontSize={7} fill="#15803d" textAnchor="middle">
           {state.mode}
         </text>
       )}
 
       {/* 라벨 */}
-      <text x={25} y={isOn ? 110 : 102} fontSize={9} fill="#374151" textAnchor="middle" fontWeight="bold">
+      <text x={25} y={isOn ? 119 : 102} fontSize={9} fill="#374151" textAnchor="middle" fontWeight="bold">
         공기청정기
       </text>
     </g>

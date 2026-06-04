@@ -14,14 +14,53 @@ export interface TVState {
 
 export interface AirPurifierState {
   power: 'on' | 'off'
-  mode: 'auto' | 'quiet' | 'standard' | 'strong' | 'turbo'
+  mode: 'auto' | 'manual' | 'sleep'
+  fan_speed: 'low' | 'medium' | 'high'
+  air_quality: 'good' | 'moderate' | 'poor'
+  pm25: number
+  filter_status: 'clean' | 'replace'
+}
+
+export interface Position {
+  x: number
+  y: number
 }
 
 export interface RobotVacuumState {
-  action: 'idle' | 'cleaning' | 'paused' | 'returning' | 'docked'
+  status: 'idle' | 'cleaning' | 'paused' | 'returning' | 'docked' | 'error'
+  battery_pct: number
   zone: string | string[] | null
   suction_power: 'quiet' | 'standard' | 'strong' | 'max'
   cleaning_mode: 'auto' | 'zigzag' | 'spot' | 'edge'
+  cleaned_area_m2: number
+  position: Position
+  do_not_disturb: boolean
+  error: string | null
+}
+
+export interface OvenState {
+  power: 'on' | 'off'
+  mode: 'bake' | 'grill' | 'convection' | 'steam' | 'microwave'
+  target_temp: number
+  current_temp: number
+  timer_remaining: number
+  fan_speed: 'off' | 'low' | 'medium' | 'high'
+  steam: 'on' | 'off'
+  probe_temp: number
+  light: 'on' | 'off'
+  door: 'open' | 'closed'
+}
+
+export interface WashingMachineState {
+  power: 'on' | 'off'
+  mode: 'standard' | 'delicate' | 'heavy' | 'quick' | 'wool' | 'rinse_spin'
+  status: 'stopped' | 'washing' | 'rinsing' | 'spinning' | 'done'
+  remaining_time: number
+  spin_speed: 'low' | 'medium' | 'high'
+  door: 'open' | 'closed'
+  water_temperature: number
+  reservation_time: string | null
+  error: string | null
 }
 
 export interface DeviceStates {
@@ -29,6 +68,8 @@ export interface DeviceStates {
   tv: TVState
   air_purifier: AirPurifierState
   robot_vacuum: RobotVacuumState
+  oven: OvenState
+  washing_machine: WashingMachineState
 }
 
 export interface ChatMessage {
