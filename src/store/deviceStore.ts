@@ -60,12 +60,13 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
 
   setDevices: (devices) => set({ devices }),
 
-  addMessage: (msg) => set((state) => ({
-    messages: [
-      ...state.messages,
-      { ...msg, id: crypto.randomUUID(), timestamp: Date.now() },
-    ],
-  })),
+  addMessage: (msg) =>
+    set((state) => ({
+      messages: [
+        ...state.messages,
+        { ...msg, id: crypto.randomUUID(), timestamp: Date.now() },
+      ],
+    })),
 
   setSessionId: (id) => set({ sessionId: id }),
   setPendingContextTrigger: (trigger) => set({ pendingContextTrigger: trigger }),
@@ -74,7 +75,14 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   setWsConnected: (connected) => set({ wsConnected: connected }),
 
   sendCommand: async (text: string) => {
-    const { addMessage, setLoading, setSessionId, setPendingContextTrigger, setClarificationTurn } = get()
+    const {
+      addMessage,
+      setLoading,
+      setSessionId,
+      setPendingContextTrigger,
+      setClarificationTurn,
+    } = get()
+
     addMessage({ role: 'user', text })
     setLoading(true)
 
@@ -82,15 +90,25 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
       const res = await fetch('/api/v1/commands/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_id: 'edge-pi-01', stt_text: text }),
+        body: JSON.stringify({
+          device_id: 'edge-pi-01',
+          raw_text: text,
+          source: 'frontend',
+        }),
       })
-      if (!res.ok) throw new Error(`서버 오류 (${res.status})`)
+
+      if (!res.ok) {
+        throw new Error(`서버 오류 (${res.status})`)
+      }
+
       const data = await res.json()
+
       setSessionId(data.session_id)
 
       if (data.clarification_needed) {
         setPendingContextTrigger('pending')
         setClarificationTurn(data.clarification_turn ?? 1)
+
         addMessage({
           role: 'assistant',
           text: data.response_text,
@@ -100,7 +118,11 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
       } else {
         setPendingContextTrigger(null)
         setClarificationTurn(0)
-        addMessage({ role: 'assistant', text: data.response_text })
+
+        addMessage({
+          role: 'assistant',
+          text: data.response_text,
+        })
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류'
@@ -111,7 +133,16 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   },
 
   sendClarification: async (text: string) => {
-    const { sessionId, pendingContextTrigger, clarificationTurn, addMessage, setLoading, setPendingContextTrigger, setClarificationTurn } = get()
+    const {
+      sessionId,
+      pendingContextTrigger,
+      clarificationTurn,
+      addMessage,
+      setLoading,
+      setPendingContextTrigger,
+      setClarificationTurn,
+    } = get()
+
     if (!sessionId || !pendingContextTrigger) return
 
     addMessage({ role: 'user', text })
@@ -126,12 +157,17 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
           user_answer: text,
         }),
       })
-      if (!res.ok) throw new Error(`서버 오류 (${res.status})`)
+
+      if (!res.ok) {
+        throw new Error(`서버 오류 (${res.status})`)
+      }
+
       const data = await res.json()
 
       if (data.clarification_needed) {
         setPendingContextTrigger('pending')
         setClarificationTurn(data.clarification_turn ?? clarificationTurn + 1)
+
         addMessage({
           role: 'assistant',
           text: data.response_text,
@@ -140,7 +176,11 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
       } else {
         setPendingContextTrigger(null)
         setClarificationTurn(0)
-        addMessage({ role: 'assistant', text: data.response_text })
+
+        addMessage({
+          role: 'assistant',
+          text: data.response_text,
+        })
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : '알 수 없는 오류'
@@ -151,23 +191,93 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   },
 
   connectWebSocket: () => {
-    if (ws && ws.readyState === WebSocket.OPEN) return
+    if (
+      ws &&
+      (ws.readyState === WebSocket.OPEN ||
+        ws.readyState === WebSocket.CONNECTING)
+    ) {
+      return
+    }
+
+    // 초기 기기 상태 로드
+    fetch('/api/v1/devices/state')
+      .then((r) => r.json())
+      .then((data: DeviceStates) => get().setDevices(data))
+      .catch(() => {})
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    ws = new WebSocket(`${protocol}//${window.location.host}/ws`)
+    ws = new WebSocket(`${protocol}//${window.location.host}/ws/device-states`)
 
-    ws.onopen = () => get().setWsConnected(true)
     ws.onclose = () => {
+      console.log('[WebSocket] disconnected')
       get().setWsConnected(false)
-      // 3초 후 재연결
       setTimeout(() => get().connectWebSocket(), 3000)
     }
     ws.onerror = () => ws?.close()
     ws.onmessage = (e) => {
       try {
-        const data = JSON.parse(e.data) as DeviceStates
-        get().setDevices(data)
+        const msg = JSON.parse(e.data)
+        if (msg.type === 'device_state_update' && msg.device_type) {
+          const current = get().devices
+          get().setDevices({
+            ...current,
+            [msg.device_type]: {
+              ...(current[msg.device_type as keyof DeviceStates] as object),
+              ...msg.state,
+            },
+          })
+        }
       } catch {}
     }
+
+      ws.onmessage = (e) => {
+        try {
+          const message = JSON.parse(e.data)
+
+          console.log('[WebSocket] message:', message)
+
+          if (message.type !== 'device_state_update') {
+            return
+          }
+
+          if (message.device_name === 'living_room_tv') {
+            set((state) => ({
+              devices: {
+                ...state.devices,
+                tv: {
+                  ...state.devices.tv,
+                  power: message.state.power ?? state.devices.tv.power,
+                  channel:
+                    message.state.channel !== undefined && message.state.channel !== null
+                      ? String(message.state.channel)
+                      : state.devices.tv.channel,
+                  content_name:
+                    message.state.content_title ?? state.devices.tv.content_name,
+                },
+              },
+            }))
+
+            return
+          }
+
+          if (message.device_name === 'living_room_aircon') {
+            set((state) => ({
+              devices: {
+                ...state.devices,
+                air_conditioner: {
+                  ...state.devices.air_conditioner,
+                  ...message.state,
+                },
+              },
+            }))
+
+            return
+          }
+
+          console.warn('[WebSocket] unknown device:', message.device_name)
+        } catch (error) {
+          console.error('[WebSocket] message parse error:', error)
+        }
+      }
   },
 }))
