@@ -28,7 +28,7 @@ const SECTOR_POLYS: Record<string, [number, number][]> = {
   세탁실: [[459.75,-17.2],[460.9,-17.2],[460.9,-15.3],[459.75,-15.3]],
   침실3: [[462.8,-17],[465.4,-17],[465.4,-16.4],[464,-16.4],[464,-15],[465.4,-15],[465.4,-14.1],[463.5,-14.1],[463.5,-13.5],[462.8,-13.5]],
   거실:  [[456.3,-14.7],[462.5,-14.7],[462.5,-13.5],[466,-13.5],[466,-11.4],[462.6,-11.4],[462.6,-10.2],[459.4,-10.2],[459.4,-11.4],[456.3,-11.4]],
-  침실1: [[462.8,-11.1],[466,-11.1],[466,-10],[465.3,-10],[465.3,-8.1],[462.8,-8.1]],
+  침실1: [[462.7,-11.1],[466,-11.1],[466,-10],[465.3,-10],[465.3,-8.1],[462.7,-8.1]],
   침실2: [[456.3,-11.1],[459.3,-11.1],[459.3,-8.1],[458.7,-8.1],[458.7,-9.8],[457.2,-9.8],[457.2,-8.1],[456.3,-8.1]],
 }
 
@@ -410,6 +410,16 @@ function RoomMesh({ onBox }: { onBox: (b: THREE.Box3) => void }) {
       if (obj) obj.visible = false
     })
 
+    // Oven1 world position 로그
+    const oven1 = scene.getObjectByName('Oven1')
+    if (oven1) {
+      const wp = new THREE.Vector3()
+      oven1.getWorldPosition(wp)
+      const box = new THREE.Box3().setFromObject(oven1)
+      const size = box.getSize(new THREE.Vector3())
+      console.log(`[Oven1] pos: ${wp.x.toFixed(2)}, ${wp.y.toFixed(2)}, ${wp.z.toFixed(2)} | size: ${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)}`)
+    }
+
     onBox(new THREE.Box3().setFromObject(scene))
   }, [scene, onBox])
 
@@ -523,7 +533,7 @@ function drawTVContent(canvas: HTMLCanvasElement, tv: TVState) {
     return
   }
 
-  const raw = (tv.content_name || tv.channel || '').trim()
+  const raw = String(tv.content_name || tv.channel || '').trim()
   if (!raw) {
     // 대기 화면 (전원 ON, 콘텐츠 미선택)
     ctx.fillStyle = '#0a1628'
@@ -716,6 +726,344 @@ function AirPurifierWaves() {
   )
 }
 
+/* ─── 오븐 효과 ──────────────────────────────────────────── */
+
+const OVEN_HEAT_COUNT = 40
+const OVEN_STEAM_COUNT = 60
+
+function OvenHeatParticles({ px, py, pz, intensity }: { px: number; py: number; pz: number; intensity: number }) {
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry()
+    const pos = new Float32Array(OVEN_HEAT_COUNT * 3)
+    for (let i = 0; i < OVEN_HEAT_COUNT; i++) {
+      pos[i * 3]     = px + (Math.random() - 0.5) * 0.25
+      pos[i * 3 + 1] = py
+      pos[i * 3 + 2] = pz + (Math.random() - 0.5) * 0.15
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    return geo
+  }, [px, py, pz])
+
+  useFrame(() => {
+    const attr = geometry.attributes.position
+    const pos  = attr.array as Float32Array
+    const spd  = 0.003 + intensity * 0.006
+    for (let i = 0; i < OVEN_HEAT_COUNT; i++) {
+      pos[i * 3]     += (Math.random() - 0.5) * 0.004
+      pos[i * 3 + 1] += spd
+      pos[i * 3 + 2] += (Math.random() - 0.5) * 0.003
+      if (pos[i * 3 + 1] > py + 0.55) {
+        pos[i * 3]     = px + (Math.random() - 0.5) * 0.25
+        pos[i * 3 + 1] = py
+        pos[i * 3 + 2] = pz + (Math.random() - 0.5) * 0.15
+      }
+    }
+    attr.needsUpdate = true
+  })
+
+  const color = intensity > 0.7 ? '#ef4444' : intensity > 0.4 ? '#f97316' : '#fbbf24'
+
+  return (
+    <points geometry={geometry}>
+      <pointsMaterial size={0.018} color={color} transparent opacity={0.65} sizeAttenuation />
+    </points>
+  )
+}
+
+function OvenSteamParticles({ px, py, pz }: { px: number; py: number; pz: number }) {
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry()
+    const pos = new Float32Array(OVEN_STEAM_COUNT * 3)
+    for (let i = 0; i < OVEN_STEAM_COUNT; i++) {
+      pos[i * 3]     = px + (Math.random() - 0.5) * 0.2
+      pos[i * 3 + 1] = py
+      pos[i * 3 + 2] = pz + (Math.random() - 0.5) * 0.1
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    return geo
+  }, [px, py, pz])
+
+  useFrame(() => {
+    const attr = geometry.attributes.position
+    const pos  = attr.array as Float32Array
+    for (let i = 0; i < OVEN_STEAM_COUNT; i++) {
+      pos[i * 3]     += (Math.random() - 0.5) * 0.003
+      pos[i * 3 + 1] += 0.006 + Math.random() * 0.003
+      pos[i * 3 + 2] += (Math.random() - 0.5) * 0.002
+      if (pos[i * 3 + 1] > py + 0.9 || Math.abs(pos[i * 3] - px) > 0.3) {
+        pos[i * 3]     = px + (Math.random() - 0.5) * 0.2
+        pos[i * 3 + 1] = py
+        pos[i * 3 + 2] = pz + (Math.random() - 0.5) * 0.1
+      }
+    }
+    attr.needsUpdate = true
+  })
+
+  return (
+    <points geometry={geometry}>
+      <pointsMaterial size={0.022} color="#e0f2fe" transparent opacity={0.5} sizeAttenuation />
+    </points>
+  )
+}
+
+const OVEN_MODE_LABEL: Record<string, string> = {
+  bake:        '베이킹',
+  grill:       '그릴',
+  convection:  '컨벡션',
+  steam:       '스팀',
+  microwave:   '전자레인지',
+}
+
+function OvenEffects() {
+  const oven = useDeviceStore(s => s.devices.oven)
+  const { scene } = useThree()
+  const [ovenPos, setOvenPos] = useState<{ x: number; y: number; z: number } | null>(null)
+
+  useEffect(() => {
+    const oven1 = scene.getObjectByName('Oven1')
+    if (oven1) {
+      const wp = new THREE.Vector3()
+      oven1.getWorldPosition(wp)
+      setOvenPos({ x: wp.x, y: wp.y, z: wp.z })
+    }
+  }, [scene])
+
+  if (!ovenPos) return null
+
+  const { x, y, z } = ovenPos
+  const effectY = y + 0.3
+  const labelY  = y + 1.0
+  const intensity = Math.min((oven.target_temp - 30) / 220, 1)
+
+  return (
+    <>
+      {oven.power === 'on' && (
+        <>
+          <OvenHeatParticles px={x} py={effectY} pz={z} intensity={intensity} />
+          <pointLight
+            position={[x, y + 0.1, z]}
+            intensity={0.3 + intensity * 0.5}
+            color={intensity > 0.6 ? '#ef4444' : '#fb923c'}
+            distance={1.5}
+            decay={2}
+          />
+        </>
+      )}
+      {oven.power === 'on' && oven.steam === 'on' && (
+        <OvenSteamParticles px={x} py={effectY} pz={z} />
+      )}
+      <Html center position={[x, labelY, z]}>
+        <div style={{
+          background: oven.power === 'on' ? 'rgba(194,65,12,0.85)' : 'rgba(71,85,105,0.75)',
+          color: '#f1f5f9',
+          padding: '3px 8px',
+          borderRadius: 6,
+          fontSize: 11,
+          fontFamily: 'sans-serif',
+          whiteSpace: 'nowrap',
+          border: `1px solid ${oven.power === 'on' ? 'rgba(251,146,60,0.6)' : 'rgba(100,116,139,0.4)'}`,
+          pointerEvents: 'none',
+        }}>
+          {oven.power === 'on'
+            ? `🔥 오븐: ${OVEN_MODE_LABEL[oven.mode] ?? oven.mode} · ${oven.target_temp}°C${oven.steam === 'on' ? ' · 💨스팀' : ''}`
+            : '오븐: OFF'}
+        </div>
+      </Html>
+    </>
+  )
+}
+
+/* ─── 세탁기 효과 ──────────────────────────────────────────── */
+
+const WM_BUBBLE_COUNT = 50
+
+function WMBubbles({ px, py, pz, color }: { px: number; py: number; pz: number; color: string }) {
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry()
+    const pos = new Float32Array(WM_BUBBLE_COUNT * 3)
+    for (let i = 0; i < WM_BUBBLE_COUNT; i++) {
+      pos[i * 3]     = px + (Math.random() - 0.5) * 0.5
+      pos[i * 3 + 1] = py + Math.random() * 0.3
+      pos[i * 3 + 2] = pz + (Math.random() - 0.5) * 0.4
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    return geo
+  }, [px, py, pz])
+
+  useFrame(() => {
+    const attr = geometry.attributes.position
+    const pos  = attr.array as Float32Array
+    for (let i = 0; i < WM_BUBBLE_COUNT; i++) {
+      pos[i * 3]     += (Math.random() - 0.5) * 0.005
+      pos[i * 3 + 1] += 0.003 + Math.random() * 0.003
+      pos[i * 3 + 2] += (Math.random() - 0.5) * 0.004
+      if (pos[i * 3 + 1] > py + 0.7) {
+        pos[i * 3]     = px + (Math.random() - 0.5) * 0.5
+        pos[i * 3 + 1] = py
+        pos[i * 3 + 2] = pz + (Math.random() - 0.5) * 0.4
+      }
+    }
+    attr.needsUpdate = true
+  })
+
+  return (
+    <points geometry={geometry}>
+      <pointsMaterial size={0.025} color={color} transparent opacity={0.6} sizeAttenuation />
+    </points>
+  )
+}
+
+function WMSpinRings({ px, py, pz }: { px: number; py: number; pz: number }) {
+  const ringsRef = useRef<(THREE.Mesh | null)[]>([null, null, null])
+
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime()
+    ringsRef.current.forEach((mesh, i) => {
+      if (!mesh) return
+      const phase = (t * 1.2 + i / 3) % 1
+      const s = 0.05 + phase * 0.6
+      mesh.scale.set(s, 1, s)
+      ;(mesh.material as THREE.MeshBasicMaterial).opacity = 0.7 * (1 - phase)
+    })
+  })
+
+  return (
+    <group position={[px, py, pz]}>
+      {[0, 1, 2].map(i => (
+        <mesh
+          key={i}
+          ref={el => { ringsRef.current[i] = el as THREE.Mesh | null }}
+          rotation={[-Math.PI / 2, 0, 0]}
+        >
+          <ringGeometry args={[0.1, 0.14, 48]} />
+          <meshBasicMaterial color="#60a5fa" transparent opacity={0} side={THREE.DoubleSide} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+function WMFrontParticles({ px, py, pz }: { px: number; py: number; pz: number }) {
+  const COUNT = 30
+  const frontZ = pz + 0.35  // 앞면 방향
+
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry()
+    const pos = new Float32Array(COUNT * 3)
+    for (let i = 0; i < COUNT; i++) {
+      pos[i * 3]     = px + (Math.random() - 0.5) * 0.3
+      pos[i * 3 + 1] = py + Math.random() * 0.4
+      pos[i * 3 + 2] = frontZ + Math.random() * 0.08
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    return geo
+  }, [px, py, frontZ])
+
+  useFrame(() => {
+    const attr = geometry.attributes.position
+    const pos  = attr.array as Float32Array
+    for (let i = 0; i < COUNT; i++) {
+      pos[i * 3]     += (Math.random() - 0.5) * 0.003
+      pos[i * 3 + 1] += 0.002 + Math.random() * 0.002
+      pos[i * 3 + 2] += 0.004
+      if (pos[i * 3 + 1] > py + 0.8 || pos[i * 3 + 2] > frontZ + 0.4) {
+        pos[i * 3]     = px + (Math.random() - 0.5) * 0.3
+        pos[i * 3 + 1] = py + Math.random() * 0.4
+        pos[i * 3 + 2] = frontZ + Math.random() * 0.08
+      }
+    }
+    attr.needsUpdate = true
+  })
+
+  return (
+    <points geometry={geometry}>
+      <pointsMaterial size={0.020} color="#3b82f6" transparent opacity={0.5} sizeAttenuation />
+    </points>
+  )
+}
+
+const WM_MODE_LABEL: Record<string, string> = {
+  standard:   '표준',
+  delicate:   '섬세',
+  heavy:      '강력',
+  quick:      '급속',
+  wool:       '울',
+  rinse_spin: '헹굼·탈수',
+}
+
+const WM_STATUS_LABEL: Record<string, string> = {
+  stopped: '정지',
+  washing: '세탁 중',
+  rinsing: '헹굼 중',
+  spinning: '탈수 중',
+  done:    '완료',
+}
+
+function WashingMachineEffects() {
+  const wm = useDeviceStore(s => s.devices.washing_machine)
+  const { scene } = useThree()
+  const [wmPos, setWmPos] = useState<{ x: number; y: number; z: number } | null>(null)
+
+  useEffect(() => {
+    let found: THREE.Object3D | null = null
+    scene.traverse(o => { if (!found && o.name === 'WashingMachine') found = o })
+    if (found) {
+      const wp = new THREE.Vector3()
+      ;(found as THREE.Object3D).getWorldPosition(wp)
+      setWmPos({ x: wp.x, y: wp.y, z: wp.z })
+    } else {
+      // GLB 실측 fallback
+      setWmPos({ x: 460.60, y: 0.0, z: -16.87 })
+    }
+  }, [scene])
+
+  if (!wmPos) return null
+
+  const { x, y, z } = wmPos
+  const effectY    = y + 0.4
+  const labelY     = y + 1.1
+  const isWashing  = wm.power === 'on' && (wm.status === 'washing' || wm.status === 'rinsing')
+  const isSpinning = wm.power === 'on' && wm.status === 'spinning'
+  const isDone     = wm.power === 'on' && wm.status === 'done'
+  const bubbleColor = wm.status === 'rinsing' ? '#93c5fd' : '#bfdbfe'
+
+  return (
+    <>
+      {isWashing  && <WMBubbles      px={x} py={effectY} pz={z} color={bubbleColor} />}
+      {isWashing  && <WMFrontParticles px={x} py={effectY} pz={z} />}
+      {isSpinning && <WMSpinRings px={x} py={effectY} pz={z} />}
+      <Html center position={[x, labelY, z]}>
+        <div style={{
+          background: isDone
+            ? 'rgba(22,163,74,0.85)'
+            : wm.power === 'on'
+              ? 'rgba(37,99,235,0.85)'
+              : 'rgba(71,85,105,0.75)',
+          color: '#f1f5f9',
+          padding: '3px 8px',
+          borderRadius: 6,
+          fontSize: 11,
+          fontFamily: 'sans-serif',
+          whiteSpace: 'nowrap',
+          border: `1px solid ${
+            isDone        ? 'rgba(134,239,172,0.5)' :
+            wm.power === 'on' ? 'rgba(147,197,253,0.5)' :
+            'rgba(100,116,139,0.4)'
+          }`,
+          pointerEvents: 'none',
+        }}>
+          {wm.power === 'off'
+            ? '세탁기: OFF'
+            : isDone
+              ? '✅ 세탁 완료'
+              : `🫧 세탁기: ${WM_STATUS_LABEL[wm.status] ?? wm.status} · ${WM_MODE_LABEL[wm.mode] ?? wm.mode} · ${wm.water_temperature}°C`
+          }
+        </div>
+      </Html>
+    </>
+  )
+}
+
 /* ─── 디바이스 상태 라벨 ──────────────────────────────────
  *
  * GLB 실측 좌표 사용 (JSON 청크에서 추출):
@@ -739,7 +1087,9 @@ function DeviceLabels() {
       label: 'TV',
       pos: [461.78, 1.4, -14.70] as [number, number, number],
       active: tv.power === 'on',
-      info: tv.power === 'on' ? (tv.content_name || tv.channel || 'ON') : 'OFF',
+      info: tv.power === 'on'
+        ? `${tv.content_name || tv.channel || 'ON'} 🔊${tv.volume}`
+        : 'OFF',
     },
     {
       id: 'ap',
@@ -769,6 +1119,87 @@ function DeviceLabels() {
           </div>
         </Html>
       ))}
+    </>
+  )
+}
+
+/* ─── 거실 조명 효과 ─────────────────────────────────────── */
+
+// 색온도(K) → hex 변환 (2700K 따뜻 ~ 6500K 차가움)
+function colorTempToHex(k: number): string {
+  const t = Math.max(0, Math.min(1, (k - 2700) / (6500 - 2700)))
+  const r = Math.round(255 - t * 55)
+  const g = Math.round(210 + t * 35)
+  const b = Math.round(130 + t * 125)
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
+}
+
+const LIGHT_COLOR_MAP: Record<string, string> = {
+  white:  '',        // color_temperature 사용
+  yellow: '#fef08a',
+  blue:   '#93c5fd',
+  red:    '#fca5a5',
+  green:  '#86efac',
+}
+
+const LIGHT_SCENE_LABEL: Record<string, string> = {
+  sleep:  '수면',
+  focus:  '집중',
+  movie:  '영화',
+  relax:  '휴식',
+}
+
+// 거실 중심 (폴리곤 기반)
+const LIVING_ROOM_CX = 461.0
+const LIVING_ROOM_CZ = -12.5
+
+function LivingRoomLight() {
+  const light = useDeviceStore(s => s.devices.light)
+
+  const hexColor = light.color !== 'white' && LIGHT_COLOR_MAP[light.color]
+    ? LIGHT_COLOR_MAP[light.color]
+    : colorTempToHex(light.color_temperature)
+
+  const opacity = light.power === 'on' ? (light.brightness / 100) * 0.45 : 0
+
+  const sceneLabel = light.scene_name ? LIGHT_SCENE_LABEL[light.scene_name] ?? light.scene_name : null
+  const infoText = light.power === 'on'
+    ? `💡 조명: ${light.brightness}%${sceneLabel ? ` · ${sceneLabel}` : ''}`
+    : '조명: OFF'
+
+  return (
+    <>
+      {/* 바닥 빛 웅덩이 */}
+      <mesh
+        position={[LIVING_ROOM_CX, 0.02, LIVING_ROOM_CZ]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        visible={light.power === 'on'}
+      >
+        <circleGeometry args={[2.8, 64]} />
+        <meshBasicMaterial
+          color={hexColor}
+          transparent
+          opacity={opacity}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+        />
+      </mesh>
+      {/* 라벨 */}
+      <Html center position={[LIVING_ROOM_CX, 0.5, LIVING_ROOM_CZ - 1.5]}>
+        <div style={{
+          background: light.power === 'on' ? 'rgba(161,120,10,0.85)' : 'rgba(71,85,105,0.75)',
+          color: '#f1f5f9',
+          padding: '3px 8px',
+          borderRadius: 6,
+          fontSize: 11,
+          fontFamily: 'sans-serif',
+          whiteSpace: 'nowrap',
+          border: `1px solid ${light.power === 'on' ? 'rgba(253,224,71,0.5)' : 'rgba(100,116,139,0.4)'}`,
+          pointerEvents: 'none',
+        }}>
+          {infoText}
+        </div>
+      </Html>
     </>
   )
 }
@@ -950,10 +1381,22 @@ export function RoomSimulator() {
     }
 
     const setStatus = (status: string) => {
-      fetch('/api/v1/command/execute', {
+      fetch('/api/v1/commands/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device: 'robot_vacuum', parameters: { status } }),
+        body: JSON.stringify({
+          session_id: 'rv-internal',
+          raw_user_input: null,
+          intent: 'device_control',
+          commands: [{
+            step_order: 1,
+            device_name: 'living_room_robot_vacuum',
+            device_type: 'robot_vacuum',
+            tool_name: 'robot_vacuum.set_action',
+            parameters: { action: status },
+          }],
+          response_text: '',
+        }),
       }).catch(() => {})
     }
 
@@ -1074,6 +1517,9 @@ export function RoomSimulator() {
           <TVScreen />
           <ACParticles />
           <AirPurifierWaves />
+          <OvenEffects />
+          <WashingMachineEffects />
+          <LivingRoomLight />
           <DeviceLabels />
           <SectorDebug />
           <mesh position={[463.68, 0.5, -13.3]}>
