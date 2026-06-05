@@ -1,7 +1,7 @@
 export interface AirConditionerState {
   power: 'on' | 'off'
   temperature: number
-  mode: 'cool' | 'heat' | 'dry' | 'fan' | 'auto'
+  mode: 'cool' | 'heat' | 'dry' | 'fan'
   fan_speed: 'auto' | 'low' | 'medium' | 'high'
   louver_angle: 'up' | 'mid' | 'down' | 'swing'
 }
