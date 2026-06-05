@@ -8,6 +8,7 @@ export interface AirConditionerState {
 
 export interface TVState {
   power: 'on' | 'off'
+  volume: number
   channel: string | null
   content_name: string | null
 }
@@ -51,6 +52,14 @@ export interface OvenState {
   door: 'open' | 'closed'
 }
 
+export interface LightState {
+  power: 'on' | 'off'
+  brightness: number
+  color: 'white' | 'yellow' | 'blue' | 'red' | 'green'
+  color_temperature: number
+  scene_name: string | null
+}
+
 export interface WashingMachineState {
   power: 'on' | 'off'
   mode: 'standard' | 'delicate' | 'heavy' | 'quick' | 'wool' | 'rinse_spin'
@@ -70,6 +79,7 @@ export interface DeviceStates {
   robot_vacuum: RobotVacuumState
   oven: OvenState
   washing_machine: WashingMachineState
+  light: LightState
 }
 
 export interface ChatMessage {

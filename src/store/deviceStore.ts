@@ -24,7 +24,7 @@ interface DeviceStore {
 
 const DEFAULT_DEVICES: DeviceStates = {
   air_conditioner: { power: 'off', temperature: 24, mode: 'cool', fan_speed: 'auto', louver_angle: 'mid' },
-  tv: { power: 'off', channel: null, content_name: null },
+  tv: { power: 'off', volume: 10, channel: null, content_name: null },
   air_purifier: { power: 'off', mode: 'auto', fan_speed: 'low', air_quality: 'good', pm25: 15, filter_status: 'clean' },
   robot_vacuum: {
     status: 'docked', battery_pct: 100, zone: null,
@@ -41,6 +41,9 @@ const DEFAULT_DEVICES: DeviceStates = {
     power: 'off', mode: 'standard', status: 'stopped',
     remaining_time: 0, spin_speed: 'medium', door: 'closed',
     water_temperature: 30, reservation_time: null, error: null,
+  },
+  light: {
+    power: 'off', brightness: 70, color: 'white', color_temperature: 4000, scene_name: 'relax',
   },
 }
 
@@ -76,7 +79,7 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/commands/parse', {
+      const res = await fetch('/api/v1/commands/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ device_id: 'edge-pi-01', stt_text: text }),
@@ -115,14 +118,12 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/dialogues/clarify', {
+      const res = await fetch('/api/v1/commands/process-clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          device_id: 'edge-pi-01',
           session_id: sessionId,
           user_answer: text,
-          clarification_turn: clarificationTurn,
         }),
       })
       if (!res.ok) throw new Error(`서버 오류 (${res.status})`)
