@@ -18,7 +18,6 @@ interface DeviceStore {
   setLoading: (loading: boolean) => void
   setWsConnected: (connected: boolean) => void
   sendCommand: (text: string) => Promise<void>
-  sendClarification: (text: string) => Promise<void>
   connectWebSocket: () => void
 }
 
@@ -74,7 +73,7 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   setWsConnected: (connected) => set({ wsConnected: connected }),
 
   sendCommand: async (text: string) => {
-    const { addMessage, setLoading, setSessionId, setPendingContextTrigger, setClarificationTurn } = get()
+    const { sessionId, addMessage, setLoading, setSessionId, setPendingContextTrigger, setClarificationTurn } = get()
     addMessage({ role: 'user', text })
     setLoading(true)
 
@@ -82,11 +81,16 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
       const res = await fetch('/api/v1/commands/process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device_id: 'edge-pi-01', stt_text: text }),
+        body: JSON.stringify({
+          device_id: 'edge-pi-01',
+          stt_text: text,
+          session_id: sessionId ?? undefined,
+          client_id: 'web-client-01',
+        }),
       })
       if (!res.ok) throw new Error(`서버 오류 (${res.status})`)
       const data = await res.json()
-      setSessionId(data.session_id)
+      if (data.session_id) setSessionId(data.session_id)
 
       if (data.clarification_needed) {
         setPendingContextTrigger('pending')
@@ -96,46 +100,6 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
           text: data.response_text,
           isClarification: true,
           sessionId: data.session_id,
-        })
-      } else {
-        setPendingContextTrigger(null)
-        setClarificationTurn(0)
-        addMessage({ role: 'assistant', text: data.response_text })
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '알 수 없는 오류'
-      addMessage({ role: 'assistant', text: `오류가 발생했습니다: ${msg}` })
-    } finally {
-      setLoading(false)
-    }
-  },
-
-  sendClarification: async (text: string) => {
-    const { sessionId, pendingContextTrigger, clarificationTurn, addMessage, setLoading, setPendingContextTrigger, setClarificationTurn } = get()
-    if (!sessionId || !pendingContextTrigger) return
-
-    addMessage({ role: 'user', text })
-    setLoading(true)
-
-    try {
-      const res = await fetch('/api/v1/commands/process-clarify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sessionId,
-          user_answer: text,
-        }),
-      })
-      if (!res.ok) throw new Error(`서버 오류 (${res.status})`)
-      const data = await res.json()
-
-      if (data.clarification_needed) {
-        setPendingContextTrigger('pending')
-        setClarificationTurn(data.clarification_turn ?? clarificationTurn + 1)
-        addMessage({
-          role: 'assistant',
-          text: data.response_text,
-          isClarification: true,
         })
       } else {
         setPendingContextTrigger(null)

@@ -37,7 +37,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 }
 
 export function ChatPanel() {
-  const { messages, isLoading, pendingContextTrigger, sendCommand, sendClarification } = useDeviceStore()
+  const { messages, isLoading, pendingContextTrigger, sendCommand } = useDeviceStore()
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -50,12 +50,7 @@ export function ChatPanel() {
     const text = input.trim()
     if (!text || isLoading) return
     setInput('')
-
-    if (pendingContextTrigger) {
-      await sendClarification(text)
-    } else {
-      await sendCommand(text)
-    }
+    await sendCommand(text)
   }
 
   const suggestions = [

@@ -635,8 +635,23 @@ function TVScreen() {
 const AC_PX = 456.75, AC_PY = 1.03, AC_PZ = -14.42
 const PARTICLE_COUNT = 80
 
+// fan_speed별 파티클 시각 파라미터
+const AC_FAN_CONFIG: Record<string, {
+  vz: number; vy: number; xSpread: number
+  size: number; opacity: number; activeCount: number; zReach: number
+}> = {
+  low:    { vz: 0.003, vy: 0.004, xSpread: 0.20, size: 0.016, opacity: 0.40, activeCount: 28, zReach: 0.8 },
+  auto:   { vz: 0.006, vy: 0.006, xSpread: 0.35, size: 0.022, opacity: 0.60, activeCount: 52, zReach: 1.2 },
+  medium: { vz: 0.009, vy: 0.008, xSpread: 0.48, size: 0.027, opacity: 0.70, activeCount: 65, zReach: 1.6 },
+  high:   { vz: 0.015, vy: 0.010, xSpread: 0.65, size: 0.034, opacity: 0.82, activeCount: 80, zReach: 2.4 },
+}
+
 function ACParticles() {
   const ac = useDeviceStore(s => s.devices.air_conditioner)
+  const acRef = useRef(ac)
+  useEffect(() => { acRef.current = ac }, [ac])
+
+  const matRef = useRef<THREE.PointsMaterial>(null)
 
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry()
@@ -651,26 +666,47 @@ function ACParticles() {
   }, [])
 
   useFrame(() => {
-    if (ac.power === 'off') return
+    const cur = acRef.current
+    if (cur.power === 'off') return
+    const cfg = AC_FAN_CONFIG[cur.fan_speed] ?? AC_FAN_CONFIG.auto
     const attr = geometry.attributes.position
     const pos  = attr.array as Float32Array
-    const isHeat = ac.mode === 'heat'
-    const vy = isHeat ? 0.005 : -0.008
+    const isHeat = cur.mode === 'heat'
+    const vy = isHeat ? cfg.vy : -cfg.vy
+
+    // 재질 파라미터 실시간 반영
+    if (matRef.current) {
+      matRef.current.size    = cfg.size
+      matRef.current.opacity = cfg.opacity
+    }
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
+      // activeCount 초과 파티클 → 뒤쪽으로 숨김
+      if (i >= cfg.activeCount) {
+        pos[i*3+2] = AC_PZ - 10
+        continue
+      }
+      // 숨겨진 파티클이 다시 활성화될 때 스폰 위치로 리셋
+      if (pos[i*3+2] < AC_PZ - 5) {
+        pos[i*3]   = AC_PX + (Math.random() - 0.5) * cfg.xSpread * 0.8
+        pos[i*3+1] = AC_PY
+        pos[i*3+2] = AC_PZ + (Math.random() - 0.5) * 0.05
+        continue
+      }
+
       pos[i*3]   += (Math.random() - 0.5) * 0.003
       pos[i*3+1] += vy + (Math.random() - 0.5) * 0.001
       // AC가 Z=-14.42, 실내는 Z=-8 방향 → 양의 Z로 확산
-      pos[i*3+2] += 0.005 + (Math.random() - 0.5) * 0.002
+      pos[i*3+2] += cfg.vz + (Math.random() - 0.5) * 0.002
 
       const outOfBounds =
-        pos[i*3+1] < 0.05 ||           // 바닥 도달
-        pos[i*3+1] > AC_PY + 1.2 ||    // 너무 높음
-        pos[i*3+2] > AC_PZ + 1.5 ||    // 너무 앞
-        Math.abs(pos[i*3] - AC_PX) > 0.6
+        pos[i*3+1] < 0.05 ||
+        pos[i*3+1] > AC_PY + 1.2 ||
+        pos[i*3+2] > AC_PZ + cfg.zReach ||
+        Math.abs(pos[i*3] - AC_PX) > cfg.xSpread
 
       if (outOfBounds) {
-        pos[i*3]   = AC_PX + (Math.random() - 0.5) * 0.35
+        pos[i*3]   = AC_PX + (Math.random() - 0.5) * cfg.xSpread * 0.8
         pos[i*3+1] = AC_PY
         pos[i*3+2] = AC_PZ + (Math.random() - 0.5) * 0.05
       }
@@ -685,7 +721,7 @@ function ACParticles() {
 
   return (
     <points geometry={geometry} visible={ac.power === 'on'}>
-      <pointsMaterial size={0.025} color={color} transparent opacity={0.65} sizeAttenuation />
+      <pointsMaterial ref={matRef} size={0.025} color={color} transparent opacity={0.65} sizeAttenuation />
     </points>
   )
 }
@@ -1071,6 +1107,10 @@ function WashingMachineEffects() {
  *   TV             : (461.78, 0.72, -14.70)
  *   Air Purfiers   : (460.85, 0.00, -15.05)
  */
+const AC_FAN_LABEL: Record<string, string> = {
+  auto: '자동', low: '약풍', medium: '중풍', high: '강풍',
+}
+
 function DeviceLabels() {
   const { air_conditioner: ac, tv, air_purifier: ap } = useDeviceStore((s) => s.devices)
 
@@ -1080,7 +1120,9 @@ function DeviceLabels() {
       label: '에어컨',
       pos: [456.75, 1.7, -14.70] as [number, number, number],
       active: ac.power === 'on',
-      info: ac.power === 'on' ? `${ac.temperature}°C · ${ac.mode}` : 'OFF',
+      info: ac.power === 'on'
+        ? `${ac.temperature}°C · ${ac.mode} · ${AC_FAN_LABEL[ac.fan_speed] ?? ac.fan_speed}`
+        : 'OFF',
     },
     {
       id: 'tv',
