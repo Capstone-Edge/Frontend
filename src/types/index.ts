@@ -84,25 +84,47 @@ export interface DeviceStates {
 
 export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'system'
+  source?: string | null
   text: string
   isClarification?: boolean
   contextTrigger?: string
-  sessionId?: string
-  timestamp: number
+  sessionId?: string | null
+  clientId?: string | null
+  deviceId?: string | null
+  status?: string | null
+  mode?: string | null
+  timestamp: number | string
 }
 
-export interface NLUResult {
-  intent: string
-  target_devices: Array<{
-    device: string
-    action: string
-    parameters: Record<string, unknown>
-  }>
-  clarification_needed: boolean
-  clarification_question: string | null
-  clarification_turn: number
-  context_trigger: string | null
-  inferred_intent: string | null
-  response_text: string
+export interface DialogueLogMessage {
+  id: number
+  session_id: string | null
+  client_id: string | null
+  device_id: string | null
+  role: 'user' | 'assistant' | 'system'
+  source: string | null
+  text: string
+  status: string | null
+  mode: string | null
+  clarification_needed: boolean | null
+  timestamp: string
 }
+
+export interface DialogueRecentResponse {
+  messages: DialogueLogMessage[]
+}
+
+export interface DialogueWebSocketSnapshot {
+  type: 'dialogue_snapshot'
+  messages: DialogueLogMessage[]
+}
+
+export interface DialogueWebSocketMessage {
+  type: 'dialogue_message'
+  message: DialogueLogMessage
+}
+
+export type DialogueWebSocketPayload =
+  | DialogueWebSocketSnapshot
+  | DialogueWebSocketMessage
