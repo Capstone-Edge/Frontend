@@ -179,6 +179,39 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
         return state
       }
 
+      // 로컬에서 먼저 추가한 user 메시지(frontend-local)가 서버에서 echo로 돌아오면
+      // 새 항목을 추가하지 않고 기존 로컬 항목을 서버 버전으로 교체한다.
+      if (serverMsg.role === 'user' && serverMsg.source === 'frontend') {
+        const localIdx = state.messages.findLastIndex(
+          (m) => m.source === 'frontend-local' && m.text === serverMsg.text,
+        )
+        if (localIdx !== -1) {
+          const nextMessages = [...state.messages]
+          nextMessages[localIdx] = mapDialogueLogToChatMessage(serverMsg)
+          const serverMessages = nextMessages
+            .filter((m) => m.id.startsWith('server-'))
+            .map((m) => ({
+              id: Number(String(m.id).replace('server-', '')),
+              session_id: m.sessionId ?? null,
+              client_id: m.clientId ?? null,
+              device_id: m.deviceId ?? null,
+              role: m.role,
+              source: m.source ?? null,
+              text: m.text,
+              status: m.status ?? null,
+              mode: m.mode ?? null,
+              clarification_needed: m.isClarification ?? false,
+              timestamp: String(m.timestamp),
+            })) as DialogueLogMessage[]
+          const pendingState = updatePendingStateFromMessages(serverMessages)
+          return {
+            messages: nextMessages,
+            pendingContextTrigger: pendingState.pendingContextTrigger,
+            sessionId: pendingState.sessionId ?? state.sessionId,
+          }
+        }
+      }
+
       const nextMessages = [
         ...state.messages,
         mapDialogueLogToChatMessage(serverMsg),
