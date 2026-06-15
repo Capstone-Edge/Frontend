@@ -355,7 +355,7 @@ function svgTo3D(pt: Pt): THREE.Vector3 {
 const MODEL_URL = '/models/capstonedesign_room.glb'
 useGLTF.preload(MODEL_URL)
 
-function RoomMesh({ onBox }: { onBox: (b: THREE.Box3) => void }) {
+function RoomMesh() {
   const { scene } = useGLTF(MODEL_URL)
 
   useEffect(() => {
@@ -420,8 +420,7 @@ function RoomMesh({ onBox }: { onBox: (b: THREE.Box3) => void }) {
       console.log(`[Oven1] pos: ${wp.x.toFixed(2)}, ${wp.y.toFixed(2)}, ${wp.z.toFixed(2)} | size: ${size.x.toFixed(2)}, ${size.y.toFixed(2)}, ${size.z.toFixed(2)}`)
     }
 
-    onBox(new THREE.Box3().setFromObject(scene))
-  }, [scene, onBox])
+  }, [scene])
 
   return <primitive object={scene} />
 }
@@ -1415,8 +1414,6 @@ export function RoomSimulator() {
   const [hoveredInfo, setHoveredInfo] = useState<HoveredInfo | null>(null)
   const handleHover = useCallback((info: HoveredInfo | null) => setHoveredInfo(info), [])
 
-  const handleBox = useCallback((_b: THREE.Box3) => {}, [])
-
   useEffect(() => {
     const clear = () => {
       if (timerRef.current !== null) { clearTimeout(timerRef.current); timerRef.current = null }
@@ -1552,7 +1549,7 @@ export function RoomSimulator() {
           <pointLight position={[-4, 3, -4]} intensity={0.3} color="#ffe8cc" />
 
           <Bounds clip margin={1.3}>
-            <RoomMesh onBox={handleBox} />
+            <RoomMesh />
           </Bounds>
 
           <RobotMover rvPos={rvPos} rv={rv} />

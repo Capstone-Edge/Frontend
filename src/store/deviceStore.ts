@@ -1,5 +1,5 @@
-const API_BASE_URL = 'http://100.104.72.38:8000'
-const WS_BASE_URL = 'ws://100.104.72.38:8000'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string
+const WS_BASE_URL = API_BASE_URL.replace(/^http/, 'ws')
 
 import { create } from 'zustand'
 
@@ -16,9 +16,7 @@ interface DeviceStore {
   messages: ChatMessage[]
   sessionId: string | null
   pendingContextTrigger: string | null
-  clarificationTurn: number
   isLoading: boolean
-  wsConnected: boolean
   dialogueWsConnected: boolean
 
   setDevices: (devices: DeviceStates) => void
@@ -27,9 +25,7 @@ interface DeviceStore {
   setServerDialogueMessages: (messages: DialogueLogMessage[]) => void
   setSessionId: (id: string | null) => void
   setPendingContextTrigger: (trigger: string | null) => void
-  setClarificationTurn: (turn: number) => void
   setLoading: (loading: boolean) => void
-  setWsConnected: (connected: boolean) => void
   setDialogueWsConnected: (connected: boolean) => void
 
   sendCommand: (text: string) => Promise<void>
@@ -152,9 +148,7 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
   messages: [],
   sessionId: null,
   pendingContextTrigger: null,
-  clarificationTurn: 0,
   isLoading: false,
-  wsConnected: false,
   dialogueWsConnected: false,
 
   setDevices: (devices) => set({ devices }),
@@ -256,17 +250,13 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
 
   setPendingContextTrigger: (trigger) => set({ pendingContextTrigger: trigger }),
 
-  setClarificationTurn: (turn) => set({ clarificationTurn: turn }),
-
   setLoading: (loading) => set({ isLoading: loading }),
-
-  setWsConnected: (connected) => set({ wsConnected: connected }),
 
   setDialogueWsConnected: (connected) => set({ dialogueWsConnected: connected }),
 
   loadRecentDialogues: async () => {
     try {
-      const res = await fetch('/api/v1/dialogues/recent?limit=100')
+      const res = await fetch(`${API_BASE_URL}/api/v1/dialogues/recent?limit=100`)
 
       if (!res.ok) {
         throw new Error(`recent dialogues failed: ${res.status}`)
@@ -286,7 +276,6 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
       setLoading,
       setSessionId,
       setPendingContextTrigger,
-      setClarificationTurn,
     } = get()
 
     addMessage({
@@ -298,7 +287,7 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
     setLoading(true)
 
     try {
-      const res = await fetch('/api/v1/commands/process', {
+      const res = await fetch(`${API_BASE_URL}/api/v1/commands/process`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -324,10 +313,8 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
 
       if (data.clarification_needed) {
         setPendingContextTrigger('pending')
-        setClarificationTurn(data.clarification_turn ?? 1)
       } else {
         setPendingContextTrigger(null)
-        setClarificationTurn(0)
       }
 
       /*
@@ -352,13 +339,11 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
       return
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    deviceWs = new WebSocket('ws://localhost:8000/ws')
+    deviceWs = new WebSocket(`${WS_BASE_URL}/ws`)
 
-    deviceWs.onopen = () => get().setWsConnected(true)
+    deviceWs.onopen = () => {}
 
     deviceWs.onclose = () => {
-      get().setWsConnected(false)
       setTimeout(() => get().connectWebSocket(), 3000)
     }
 
@@ -381,8 +366,7 @@ export const useDeviceStore = create<DeviceStore>((set, get) => ({
       return
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    dialogueWs = new WebSocket('ws://localhost:8000/api/v1/dialogues/ws')
+    dialogueWs = new WebSocket(`${WS_BASE_URL}/api/v1/dialogues/ws`)
 
     dialogueWs.onopen = () => {
       get().setDialogueWsConnected(true)

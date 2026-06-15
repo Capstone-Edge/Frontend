@@ -88,7 +88,6 @@ export interface ChatMessage {
   source?: string | null
   text: string
   isClarification?: boolean
-  contextTrigger?: string
   sessionId?: string | null
   clientId?: string | null
   deviceId?: string | null
