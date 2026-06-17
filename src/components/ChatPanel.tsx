@@ -1,35 +1,79 @@
-import { useRef, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDeviceStore } from '../store/deviceStore'
 import type { ChatMessage } from '../types'
 
+function formatTime(timestamp: number | string) {
+  const date =
+    typeof timestamp === 'number'
+      ? new Date(timestamp)
+      : new Date(timestamp)
+
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+
+  return date.toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+function sourceLabel(source?: string | null) {
+  if (source === 'edge') return 'EDGE'
+  if (source === 'backend') return 'BACKEND'
+  if (source === 'frontend') return 'FRONT'
+  if (source === 'frontend-local') return 'FRONT'
+  return source?.toUpperCase() || 'LOG'
+}
+
 function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === 'user'
+
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-2`}>
-      {!isUser && (
-        <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs mr-2 mt-1 flex-shrink-0">
-          AI
-        </div>
-      )}
+    <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`
-          max-w-[220px] px-3 py-2 rounded-2xl text-sm leading-snug
-          ${isUser
-            ? 'bg-blue-500 text-white rounded-br-sm'
-            : msg.isClarification
-              ? 'bg-amber-50 border border-amber-300 text-amber-900 rounded-bl-sm'
-              : 'bg-gray-100 text-gray-800 rounded-bl-sm'
-          }
-        `}
+        className={[
+          'max-w-[82%] rounded-2xl px-3 py-2 text-sm shadow-sm',
+          isUser
+            ? 'rounded-br-sm bg-indigo-600 text-white'
+            : 'rounded-bl-sm border border-gray-200 bg-white text-gray-800',
+        ].join(' ')}
       >
-        {msg.isClarification && (
-          <div className="text-xs font-semibold text-amber-600 mb-1 flex items-center gap-1">
-            <span>?</span> 확인이 필요해요
-          </div>
-        )}
-        {msg.text}
-        <div className={`text-xs mt-1 ${isUser ? 'text-blue-200' : 'text-gray-400'}`}>
-          {new Date(msg.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+        <div className="mb-1 flex items-center gap-1.5 text-[10px] opacity-80">
+          <span
+            className={[
+              'rounded-full px-1.5 py-0.5 font-semibold',
+              isUser ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600',
+            ].join(' ')}
+          >
+            {sourceLabel(msg.source)}
+          </span>
+
+          {msg.isClarification && (
+            <span className="rounded-full bg-yellow-100 px-1.5 py-0.5 font-semibold text-yellow-700">
+              재질문
+            </span>
+          )}
+
+          {msg.status && (
+            <span className="rounded-full bg-gray-100 px-1.5 py-0.5 font-semibold text-gray-500">
+              {msg.status}
+            </span>
+          )}
+        </div>
+
+        <div className="whitespace-pre-wrap break-words leading-relaxed">
+          {msg.text}
+        </div>
+
+        <div
+          className={[
+            'mt-1 text-right text-[10px]',
+            isUser ? 'text-indigo-100' : 'text-gray-400',
+          ].join(' ')}
+        >
+          {formatTime(msg.timestamp)}
         </div>
       </div>
     </div>
@@ -37,9 +81,16 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 }
 
 export function ChatPanel() {
-  const { messages, isLoading, pendingContextTrigger, sendCommand, sendClarification } = useDeviceStore()
+  const {
+    messages,
+    isLoading,
+    pendingContextTrigger,
+    dialogueWsConnected,
+    sendCommand,
+  } = useDeviceStore()
+
   const [input, setInput] = useState('')
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -47,103 +98,124 @@ export function ChatPanel() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const text = input.trim()
-    if (!text || isLoading) return
-    setInput('')
 
-    if (pendingContextTrigger) {
-      await sendClarification(text)
-    } else {
-      await sendCommand(text)
+    const text = input.trim()
+
+    if (!text || isLoading) {
+      return
     }
+
+    setInput('')
+    await sendCommand(text)
   }
 
   const suggestions = [
-    '에어컨 켜줘', 'TV 넷플릭스 틀어줘', '청소기 돌려줘',
-    '집이 너무 덥네', '나 자려고', '전부 꺼줘',
+    '에어컨 켜줘',
+    '집이 너무 덥네',
+    '24도로 해줘',
+    '거실 불 꺼줘',
+    '청소기 돌려줘',
+    '이전 요청 취소해',
   ]
 
   return (
-    <div className="w-80 flex flex-col bg-white border-l border-gray-200 shadow-sm">
-      {/* 헤더 */}
-      <div className="px-4 py-3 border-b border-gray-100 bg-indigo-600">
-        <h3 className="text-white font-bold text-sm">스마트홈 어시스턴트</h3>
-        <p className="text-indigo-200 text-xs mt-0.5">자연어로 기기를 제어하세요</p>
-      </div>
+    <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-gray-200 bg-gray-50">
+      <header className="border-b border-gray-200 bg-white px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">
+              Edge ↔ Backend 실시간 로그
+            </h2>
+            <p className="text-xs text-gray-500">
+              WebSocket으로 대화 로그를 즉시 표시합니다.
+            </p>
+          </div>
 
-      {/* 빠른 명령 (메시지 없을 때) */}
+          <span
+            className={[
+              'rounded-full px-2 py-1 text-xs font-semibold',
+              dialogueWsConnected
+                ? 'bg-green-100 text-green-700'
+                : 'bg-red-100 text-red-700',
+            ].join(' ')}
+          >
+            {dialogueWsConnected ? 'LIVE ON' : 'LIVE OFF'}
+          </span>
+        </div>
+      </header>
+
       {messages.length === 0 && (
-        <div className="p-3 border-b border-gray-100">
-          <p className="text-xs text-gray-500 mb-2 font-medium">빠른 명령어</p>
-          <div className="flex flex-wrap gap-1.5">
+        <section className="border-b border-gray-200 bg-white px-4 py-3">
+          <p className="mb-2 text-xs font-semibold text-gray-500">
+            빠른 테스트 명령어
+          </p>
+
+          <div className="flex flex-wrap gap-2">
             {suggestions.map((s) => (
               <button
                 key={s}
+                type="button"
                 onClick={() => sendCommand(s)}
-                className="text-xs px-2 py-1 bg-gray-100 hover:bg-indigo-50 hover:text-indigo-600 text-gray-600 rounded-full transition-colors"
+                className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600 transition hover:bg-indigo-50 hover:text-indigo-600"
               >
                 {s}
               </button>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* 대화 영역 */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-1">
-        {messages.length === 0 && (
-          <div className="text-center text-gray-400 text-xs mt-8">
-            <div className="text-3xl mb-2">🏠</div>
-            명령어를 입력하거나<br />위 버튼을 눌러 시작하세요
+      <main className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        {messages.length === 0 ? (
+          <div className="mt-20 text-center text-sm text-gray-400">
+            아직 표시할 대화가 없습니다.
+            <br />
+            Edge에서 말하거나 아래 입력창으로 테스트하세요.
           </div>
+        ) : (
+          messages.map((msg) => <MessageBubble key={msg.id} msg={msg} />)
         )}
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
-        ))}
+
         {isLoading && (
-          <div className="flex justify-start mb-2">
-            <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs mr-2 mt-1">AI</div>
-            <div className="bg-gray-100 px-3 py-2 rounded-2xl rounded-bl-sm">
-              <div className="flex gap-1 items-center h-4">
-                {[0, 1, 2].map((i) => (
-                  <div key={i}
-                    className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"
-                    style={{ animationDelay: `${i * 0.15}s` }}
-                  />
-                ))}
-              </div>
+          <div className="flex justify-start">
+            <div className="rounded-2xl rounded-bl-sm border border-gray-200 bg-white px-3 py-2 text-sm text-gray-500 shadow-sm">
+              처리 중...
             </div>
           </div>
         )}
-        <div ref={bottomRef} />
-      </div>
 
-      {/* 입력창 */}
-      <div className="border-t border-gray-100 p-3">
+        <div ref={bottomRef} />
+      </main>
+
+      <footer className="border-t border-gray-200 bg-white px-4 py-3">
         {pendingContextTrigger && (
-          <div className="mb-2 text-xs text-amber-600 bg-amber-50 rounded-lg px-2 py-1.5 flex items-center gap-1">
-            <span className="font-bold">?</span>
-            <span>답변을 기다리고 있어요...</span>
+          <div className="mb-2 rounded-lg bg-yellow-50 px-3 py-2 text-xs font-medium text-yellow-700">
+            재질문 답변을 기다리는 중입니다.
           </div>
         )}
+
         <form onSubmit={handleSubmit} className="flex gap-2">
           <input
-            type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={pendingContextTrigger ? '답변을 입력하세요...' : '명령을 입력하세요...'}
+            placeholder={
+              pendingContextTrigger
+                ? '재질문 답변을 입력하세요...'
+                : '프론트에서 테스트 명령 입력...'
+            }
             disabled={isLoading}
-            className="flex-1 text-sm border border-gray-200 rounded-xl px-3 py-2 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 disabled:bg-gray-50 disabled:text-gray-400 transition"
+            className="flex-1 rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 disabled:bg-gray-50 disabled:text-gray-400"
           />
+
           <button
             type="submit"
             disabled={isLoading || !input.trim()}
-            className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white text-sm rounded-xl transition-colors font-medium"
+            className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             전송
           </button>
         </form>
-      </div>
-    </div>
+      </footer>
+    </aside>
   )
 }
